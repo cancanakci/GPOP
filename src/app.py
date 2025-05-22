@@ -97,7 +97,6 @@ def display_data_visualizations(training_data, model=None):
     st.subheader("Training Data")
     
     # Correlation Heatmap
-    st.write("Feature Correlation Heatmap")
     corr = df_combined.corr()
     fig = px.imshow(corr, text_auto=True, title='Feature Correlation Heatmap')
     fig.update_layout(
@@ -109,7 +108,6 @@ def display_data_visualizations(training_data, model=None):
     st.plotly_chart(fig)
     
     # Distribution plots for all features
-    st.write("Feature Distributions")
     for col in df_combined.columns:
         fig = make_subplots(rows=1, cols=2, 
                           subplot_titles=(f'{col} Distribution', f'{col} Box Plot'))
@@ -137,7 +135,6 @@ def display_data_visualizations(training_data, model=None):
     
     # Feature importance plot
     if model is not None and hasattr(model, 'feature_importances_'):
-        st.write("Feature Importance")
         importances = model.feature_importances_
         feature_importance_df = pd.DataFrame({
             'Feature': feature_names,
