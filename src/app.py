@@ -94,7 +94,7 @@ def display_data_visualizations(training_data, model=None):
     df_combined = X_combined.copy()
     df_combined['Brüt Güç'] = y_combined.values
     
-    st.subheader("Training Data Visualizations")
+    st.subheader("Training Data")
     
     # Correlation Heatmap
     st.write("Feature Correlation Heatmap")
