@@ -1,11 +1,11 @@
 # Geothermal Power Output Prediction Tool
 
-This project is a machine learning-based tool for predicting power output from geothermal systems. It includes data processing, model training, and a Streamlit web app for interactive predictions.
+GPOP is a machine learning-based tool for predicting power output from geothermal systems. It includes data processing, model training, and a Streamlit web app for interactive predictions.
 
 ## Features
 - Pre-trained default model for immediate predictions
 - Option to train custom models with your own data
-- Data preprocessing and feature engineering
+- Data preprocessing
 - Model training and evaluation
 - Power output prediction
 - Streamlit web app for interactive predictions
@@ -44,4 +44,4 @@ The app provides two main options:
    - Make predictions with your custom model
 
 ## Data Format
-Your data should be in CSV or Excel format and include the target feature "Brüt Güç" (Gross Power) along with other relevant features.
+Your data should be in CSV or Excel format and include the target feature "Brüt Güç" (Gross Power) along with other relevant features. Consider training your own model if your simulation data has different features.
