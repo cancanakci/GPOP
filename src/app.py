@@ -520,7 +520,6 @@ def main():
                     
                     # Display loss curve if available
                     if 'loss_curve' in metrics['metrics']:
-                        st.sidebar.subheader("Training Loss Curve")
                         loss_curve = metrics['metrics']['loss_curve']
                         epochs = range(1, len(loss_curve['train_loss']) + 1)
                         df_loss = pd.DataFrame({
