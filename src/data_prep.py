@@ -124,11 +124,17 @@ def preprocess_data(df):
     """Perform preprocessing on the dataframe, including interpolation."""
     processed_df = df.copy()
 
+    # Drop non-numeric columns (e.g., datetime columns)
+    numeric_df = processed_df.select_dtypes(include=['number'])
+    if numeric_df.empty:
+        raise ValueError("No numeric features available after dropping non-numeric columns.")
+    processed_df = numeric_df
+
     # Handle missing values using linear interpolation
     processed_df.interpolate(inplace=True)
 
     # Handle any remaining NaNs with mean imputation
-    for col in processed_df.select_dtypes(include='number').columns:
+    for col in processed_df.columns:
          processed_df[col].fillna(processed_df[col].mean(), inplace=True)
 
     return processed_df
