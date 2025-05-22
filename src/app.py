@@ -348,7 +348,11 @@ def main():
                     st.info("Please upload a file to make batch predictions.")
 
             # Load and display metrics in sidebar (only for default model)
-            metrics = load_latest_metrics("models")
+            metrics_path = os.path.join("models", "default_metrics.json")
+            metrics = None
+            if os.path.exists(metrics_path):
+                with open(metrics_path, 'r') as f:
+                    metrics = json.load(f)
             if metrics:
                 st.sidebar.title("Model Information")
                 st.sidebar.write(f"Model Type: {metrics['model_type']}")
