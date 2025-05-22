@@ -52,12 +52,13 @@ def load_data(file_path):
                 print(f"First line: {first_line}")  # Debug print
                 
                 # Try different delimiters
-                delimiters = [',', ';', '\t', '|']
+                delimiters = [';', ',', '\t', '|']  # Prioritize semicolon
                 for delimiter in delimiters:
                     try:
                         # Reset file pointer
                         file_path.seek(0)
-                        df = pd.read_csv(file_path, sep=delimiter, encoding='utf-8')
+                        # Add decimal=',' to handle comma decimal separator
+                        df = pd.read_csv(file_path, sep=delimiter, encoding='utf-8', decimal=',')
                         print(f"Successfully read with delimiter: {delimiter}")  # Debug print
                         print(f"Columns found: {df.columns.tolist()}")  # Debug print
                         if len(df.columns) > 1:
@@ -69,7 +70,8 @@ def load_data(file_path):
                 # If all delimiters fail, try with python engine
                 try:
                     file_path.seek(0)
-                    df = pd.read_csv(file_path, sep=None, engine='python')
+                    # Add decimal=',' to handle comma decimal separator
+                    df = pd.read_csv(file_path, sep=None, engine='python', decimal=',')
                     print("Successfully read with python engine")  # Debug print
                     print(f"Columns found: {df.columns.tolist()}")  # Debug print
                     if len(df.columns) > 1:
@@ -86,10 +88,11 @@ def load_data(file_path):
         elif isinstance(file_path, str):
             if file_path.endswith('.csv'):
                 # Try different delimiters for CSV
-                delimiters = [',', ';', '\t', '|']
+                delimiters = [';', ',', '\t', '|']  # Prioritize semicolon
                 for delimiter in delimiters:
                     try:
-                        df = pd.read_csv(file_path, sep=delimiter, encoding='utf-8')
+                        # Add decimal=',' to handle comma decimal separator
+                        df = pd.read_csv(file_path, sep=delimiter, encoding='utf-8', decimal=',')
                         if len(df.columns) > 1:
                             return df
                     except:
@@ -99,13 +102,15 @@ def load_data(file_path):
             elif file_path.endswith(('.xlsx', '.xls')):
                 try:
                     # Try openpyxl first
-                    df = pd.read_excel(file_path, engine='openpyxl')
+                    # Add decimal=',' to handle comma decimal separator
+                    df = pd.read_excel(file_path, engine='openpyxl', decimal=',')
                     if len(df.columns) > 1:
                         return df
                 except Exception as e:
                     try:
                         # Try xlrd as fallback
-                        df = pd.read_excel(file_path, engine='xlrd')
+                        # Add decimal=',' to handle comma decimal separator
+                        df = pd.read_excel(file_path, engine='xlrd', decimal=',')
                         if len(df.columns) > 1:
                             return df
                     except Exception as e:
@@ -120,12 +125,30 @@ def load_data(file_path):
         print(f"Error loading file: {str(e)}")
         raise
 
+    # Force numeric columns to be parsed as numeric - Keep this as a fallback
+    for col in df.columns:
+        # Only attempt conversion if the dtype is not already numeric
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # After trying to convert, check if any numeric columns exist
+    numeric_cols_after_conversion = df.select_dtypes(include=['number']).columns.tolist()
+    if not numeric_cols_after_conversion:
+        raise ValueError("No numeric columns found even after attempting conversion.")
+        
+    return df
+
 def preprocess_data(df):
     """Perform preprocessing on the dataframe, including interpolation."""
     processed_df = df.copy()
 
+    # Debug: Print DataFrame dtypes
+    print("DataFrame dtypes:")
+    print(processed_df.dtypes)
+
     # Drop non-numeric columns (e.g., datetime columns)
     numeric_df = processed_df.select_dtypes(include=['number'])
+    print("Numeric columns found:", numeric_df.columns.tolist())
     if numeric_df.empty:
         raise ValueError("No numeric features available after dropping non-numeric columns.")
     processed_df = numeric_df

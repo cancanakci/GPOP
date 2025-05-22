@@ -1,5 +1,5 @@
 {
-    "timestamp": "20250522_193401",
+    "timestamp": "20250522_200801",
     "model_type": "XGBoost",
     "metrics": {
         "mse": 0.34761462515842134,
@@ -77,7 +77,7 @@
         "Pressure Differential",
         "Reinjection Temperature"
     ],
-    "plot_path": "models/actual_vs_predicted_20250522_193401.png",
+    "plot_path": "models/actual_vs_predicted_20250522_200801.png",
     "actual": [
         25.09971559047699,
         36.272257804870605,
