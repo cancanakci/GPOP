@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 
-def train_model(data_path, models_dir, target_column='Brüt Güç', n_splits=5, is_default=False):
+def train_model(data_path, models_dir, target_column=None, n_splits=5, is_default=False):
     """Loads data, preprocesses it, trains XGBoost model with cross-validation, and saves model with metrics."""
     
     # Create timestamp for model versioning
@@ -36,6 +36,10 @@ def train_model(data_path, models_dir, target_column='Brüt Güç', n_splits=5, 
 
     # --- Preprocessing (Interpolation) ---
     df_processed = preprocess_data(df)
+    
+    # If target_column is not specified, use the last column
+    if target_column is None:
+        target_column = df_processed.columns[-1]
     
     if target_column not in df_processed.columns:
         raise ValueError(f"Target column '{target_column}' not found in data after preprocessing.")

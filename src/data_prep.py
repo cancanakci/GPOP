@@ -121,9 +121,7 @@ def load_data(file_path):
         raise
 
 def preprocess_data(df):
-    """Perform preprocessing on the dataframe, including interpolation.
-    Assumes target column is 'Brüt Güç'.
-    """
+    """Perform preprocessing on the dataframe, including interpolation."""
     processed_df = df.copy()
 
     # Handle missing values using linear interpolation
@@ -132,9 +130,5 @@ def preprocess_data(df):
     # Handle any remaining NaNs with mean imputation
     for col in processed_df.select_dtypes(include='number').columns:
          processed_df[col].fillna(processed_df[col].mean(), inplace=True)
-
-    # Verify target column exists
-    if 'Brüt Güç' not in processed_df.columns:
-        raise ValueError("Target column 'Brüt Güç' not found in the data.")
 
     return processed_df

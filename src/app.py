@@ -85,6 +85,7 @@ def display_data_visualizations(training_data, model=None):
     y_train = training_data['y_train']
     y_test = training_data['y_test']
     feature_names = training_data['feature_names']
+    target_column = training_data.get('target_column', 'Target')
     
     # Combine train and test data for visualization
     X_combined = pd.concat([X_train, X_test])
@@ -92,7 +93,7 @@ def display_data_visualizations(training_data, model=None):
     
     # Create a DataFrame with all features and target
     df_combined = X_combined.copy()
-    df_combined['Brüt Güç'] = y_combined.values
+    df_combined[target_column] = y_combined.values
     
     st.subheader("Training Data")
     
@@ -150,7 +151,7 @@ def display_data_visualizations(training_data, model=None):
         fig.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig)
 
-def display_prediction_visualizations(results_df):
+def display_prediction_visualizations(results_df, target_column='Target'):
     """Display visualizations for batch prediction results."""
     st.subheader("Prediction Results Visualizations")
     
@@ -425,12 +426,14 @@ def main():
                 st.dataframe(df.describe())
                 
                 # Create training data dictionary for visualization
+                target_column = df.columns[-1]  # Get the last column name
                 training_data = {
-                    'X_train': df.drop('Brüt Güç', axis=1),
-                    'X_test': df.drop('Brüt Güç', axis=1).iloc[:len(df)//5],  # Use 20% for test
-                    'y_train': df['Brüt Güç'],
-                    'y_test': df['Brüt Güç'].iloc[:len(df)//5],
-                    'feature_names': df.drop('Brüt Güç', axis=1).columns.tolist()
+                    'X_train': df.drop(target_column, axis=1),
+                    'X_test': df.drop(target_column, axis=1).iloc[:len(df)//5],  # Use 20% for test
+                    'y_train': df[target_column],
+                    'y_test': df[target_column].iloc[:len(df)//5],
+                    'feature_names': df.drop(target_column, axis=1).columns.tolist(),
+                    'target_column': target_column
                 }
                 
                 # Use session state to persist new model info

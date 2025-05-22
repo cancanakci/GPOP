@@ -1,5 +1,5 @@
 {
-    "timestamp": "20250522_171524",
+    "timestamp": "20250522_193401",
     "model_type": "XGBoost",
     "metrics": {
         "mse": 0.34761462515842134,
@@ -70,14 +70,14 @@
         "verbosity": null
     },
     "feature_names": [
-        "Brine debi",
-        "S\u0131cakl\u0131k",
-        "NCG+Buhar debi",
-        "Hava s\u0131cakl\u0131\u011f\u0131",
-        "Fark bas\u0131n\u00e7",
-        "Reenjeksiyon s\u0131cakl\u0131\u011f\u0131"
+        "Brine Flowrate",
+        "Temperature",
+        "NCG+Steam Flowrate",
+        "Ambient Temperature",
+        "Pressure Differential",
+        "Reinjection Temperature"
     ],
-    "plot_path": "models/actual_vs_predicted_20250522_171524.png",
+    "plot_path": "models/actual_vs_predicted_20250522_193401.png",
     "actual": [
         25.09971559047699,
         36.272257804870605,
