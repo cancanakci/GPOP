@@ -398,6 +398,20 @@ def main():
                     fig.add_shape(type='line', x0=min(actual), y0=min(actual), x1=max(actual), y1=max(actual),
                                   line=dict(color='black', dash='dash'))
                     st.sidebar.plotly_chart(fig, use_container_width=True)
+                
+                # Display loss curve if available
+                if 'loss_curve' in metrics['metrics']:
+                    loss_curve = metrics['metrics']['loss_curve']
+                    epochs = range(1, len(loss_curve['train_loss']) + 1)
+                    df_loss = pd.DataFrame({
+                        'Epoch': epochs,
+                        'Training Loss': loss_curve['train_loss'],
+                        'Validation Loss': loss_curve['test_loss']
+                    })
+                    fig = px.line(df_loss, x='Epoch', y=['Training Loss', 'Validation Loss'],
+                                title='Training and Validation Loss',
+                                labels={'value': 'RMSE Loss', 'variable': 'Dataset'})
+                    st.sidebar.plotly_chart(fig, use_container_width=True)
             else:
                 st.sidebar.warning("No model metrics found.")
     else:  # Train New Model
@@ -502,6 +516,21 @@ def main():
                                          labels={'Actual': 'Actual Brüt Güç', 'Predicted': 'Predicted Brüt Güç'})
                         fig.add_shape(type='line', x0=min(actual), y0=min(actual), x1=max(actual), y1=max(actual),
                                       line=dict(color='black', dash='dash'))
+                        st.sidebar.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display loss curve if available
+                    if 'loss_curve' in metrics['metrics']:
+                        st.sidebar.subheader("Training Loss Curve")
+                        loss_curve = metrics['metrics']['loss_curve']
+                        epochs = range(1, len(loss_curve['train_loss']) + 1)
+                        df_loss = pd.DataFrame({
+                            'Epoch': epochs,
+                            'Training Loss': loss_curve['train_loss'],
+                            'Validation Loss': loss_curve['test_loss']
+                        })
+                        fig = px.line(df_loss, x='Epoch', y=['Training Loss', 'Validation Loss'],
+                                    title='Training and Validation Loss',
+                                    labels={'value': 'RMSE Loss', 'variable': 'Dataset'})
                         st.sidebar.plotly_chart(fig, use_container_width=True)
                     st.subheader("Make Predictions")
                     input_method = st.radio(

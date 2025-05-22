@@ -90,7 +90,8 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         subsample=0.8,
         colsample_bytree=0.8,
         random_state=42,
-        n_jobs=-1
+        n_jobs=-1,
+        eval_metric='rmse'
     )
 
     # Perform k-fold cross-validation
@@ -107,7 +108,15 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     print(f"Mean CV RMSE: {cv_rmse_scores.mean():.4f} (+/- {cv_rmse_scores.std() * 2:.4f})")
 
     # Train final model on full training set
-    xgb_model.fit(X_train_scaled, y_train)
+    xgb_model.fit(X_train_scaled, y_train, 
+                 eval_set=[(X_train_scaled, y_train), (X_test_scaled, y_test)],
+                 verbose=False)
+    
+    # Get training history
+    results = xgb_model.evals_result()
+    train_loss = results['validation_0']['rmse']
+    test_loss = results['validation_1']['rmse']
+    
     xgb_preds = xgb_model.predict(X_test_scaled)
     xgb_mse = mean_squared_error(y_test, xgb_preds)
     xgb_rmse = np.sqrt(xgb_mse)
@@ -165,6 +174,10 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
                     'r2': cv_r2_scores.tolist(),
                     'rmse': cv_rmse_scores.tolist()
                 }
+            },
+            'loss_curve': {
+                'train_loss': train_loss,
+                'test_loss': test_loss
             }
         },
         'model_params': xgb_model.get_params(),
