@@ -477,7 +477,7 @@
     },
     "feature_names": [
         "Brine Flowrate (T/h)",
-        "Temperature (\u00b0C)",
+        "Fluid Temperature (\u00b0C)",
         "NCG+Steam Flowrate (T/h)",
         "Ambient Temperature (\u00b0C)",
         "Heat Exchanger Pressure Differential (Bar)",

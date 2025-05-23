@@ -305,9 +305,24 @@ def main():
         if input_method == "Single Prediction":
             st.write("Enter values for prediction:")
             input_data = {}
+            
+            # Get training data for ranges
+            training_data = joblib.load(os.path.join("models", "default_training_data.pkl"))
+            X_train = training_data['X_train']
+            
             for feature in feature_names:
+                # Calculate ranges for this feature
+                train_min = X_train[feature].min()
+                train_max = X_train[feature].max()
+                train_q1 = X_train[feature].quantile(0.25)
+                train_q3 = X_train[feature].quantile(0.75)
+                train_iqr = train_q3 - train_q1
+                iqr_lower = train_q1 - 1.5 * train_iqr
+                iqr_upper = train_q3 + 1.5 * train_iqr
+                
+                # Create the input field with range information inline
                 input_data[feature] = st.number_input(
-                    f"{feature}",
+                    f"{feature} (Typical Range: {iqr_lower:.2f} - {iqr_upper:.2f})",
                     value=0.0,
                     format="%.4f"
                 )
