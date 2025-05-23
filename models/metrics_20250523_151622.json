@@ -1,5 +1,5 @@
 {
-    "timestamp": "20250522_210606",
+    "timestamp": "20250523_151622",
     "model_type": "XGBoost",
     "metrics": {
         "mse": 0.34761462515842134,
@@ -483,7 +483,7 @@
         "Pressure Differential",
         "Reinjection Temperature"
     ],
-    "plot_path": "models/actual_vs_predicted_20250522_210606.png",
+    "plot_path": "models/actual_vs_predicted_20250523_151622.png",
     "actual": [
         25.09971559047699,
         36.272257804870605,
@@ -3992,5 +3992,5 @@
         48.97223663330078,
         36.57819366455078
     ],
-    "training_data_path": "models/training_data_20250522_210606.pkl"
+    "training_data_path": "models/training_data_20250523_151622.pkl"
 }
