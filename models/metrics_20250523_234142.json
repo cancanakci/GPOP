@@ -1,5 +1,5 @@
 {
-    "timestamp": "20250523_151622",
+    "timestamp": "20250523_234142",
     "model_type": "XGBoost",
     "metrics": {
         "mse": 0.34761462515842134,
@@ -476,14 +476,14 @@
         "verbosity": null
     },
     "feature_names": [
-        "Brine Flowrate",
-        "Temperature",
-        "NCG+Steam Flowrate",
-        "Ambient Temperature",
-        "Pressure Differential",
-        "Reinjection Temperature"
+        "Brine Flowrate (T/h)",
+        "Fluid Temperature (\u00b0C)",
+        "NCG+Steam Flowrate (T/h)",
+        "Ambient Temperature (\u00b0C)",
+        "Heat Exchanger Pressure Differential (Bar)",
+        "Reinjection Temperature (\u00b0C)"
     ],
-    "plot_path": "models/actual_vs_predicted_20250523_151622.png",
+    "plot_path": "models/actual_vs_predicted_20250523_234142.png",
     "actual": [
         25.09971559047699,
         36.272257804870605,
@@ -3992,5 +3992,5 @@
         48.97223663330078,
         36.57819366455078
     ],
-    "training_data_path": "models/training_data_20250523_151622.pkl"
+    "training_data_path": "models/training_data_20250523_234142.pkl"
 }
