@@ -18,7 +18,7 @@ def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None,
         st.error("⚠️ Warning: The following features have values outside the training data range. This is usually caused by mismatched units, NaN inputs or mismatched features. Please verify values:")
         for feature in red_warnings:
             ranges = warning_ranges[feature]
-            st.write(f"- {feature} (Training Range: {ranges['min']:.2f} - {ranges['max']:.2f})")
+            st.write(f"- {feature} (MIN/MAX Range: {ranges['min']:.2f} - {ranges['max']:.2f})")
 
     if yellow_warnings:
         st.warning("⚠️ Note: The following features have values outside the typical interquartile range. Please verify values:")
@@ -35,7 +35,7 @@ def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None,
         st.info(f"Warning Summary: {red_warning_rows} rows have red warnings, {yellow_warning_rows} rows have yellow warnings out of {total_rows} total rows.")
 
     if yellow_warnings or red_warnings:
-        st.warning("While predictions are still made, expected error metrics may not apply for these predictions.")
+        st.warning("⚠️ Current predictions are **UNRELIABLE**, see warnings.")
 
 def load_latest_metrics(models_dir):
     """Load the latest metrics file from the models directory."""

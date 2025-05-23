@@ -11,6 +11,34 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 
+def get_monotonicity_constraints(X, y, correlation_threshold=0.6):
+    """
+    Calculate monotonicity constraints based on feature correlations with target.
+    
+    Args:
+        X: Feature DataFrame
+        y: Target Series
+        correlation_threshold: Absolute correlation threshold to apply constraints
+        
+    Returns:
+        List of monotonicity constraints (1 for positive correlation, -1 for negative, 0 for weak correlation)
+    """
+    # Calculate correlations with target
+    correlations = X.corrwith(y)
+    
+    # Initialize constraints list
+    constraints = []
+    
+    for corr in correlations:
+        if abs(corr) < correlation_threshold:
+            # Weak correlation, no constraint
+            constraints.append(0)
+        else:
+            # Strong correlation, set constraint based on direction
+            constraints.append(1 if corr > 0 else -1)
+    
+    return constraints
+
 def train_model(data_path, models_dir, target_column=None, n_splits=5, is_default=False):
     """Loads data, preprocesses it, trains XGBoost model with cross-validation, and saves model with metrics."""
     
@@ -81,6 +109,15 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
 
     # --- Model Training and Evaluation ---
     print("\nTraining XGBoostRegressor...")
+    
+    # Calculate monotonicity constraints based on correlations
+    monotone_constraints = get_monotonicity_constraints(X_train, y_train)
+    print("\nMonotonicity constraints based on correlations:")
+    for feature, constraint in zip(feature_names, monotone_constraints):
+        if constraint != 0:
+            direction = "increasing" if constraint == 1 else "decreasing"
+            print(f"- {feature}: {direction}")
+    
     xgb_model = xgb.XGBRegressor(
         objective='reg:squarederror',
         n_estimators=200,
@@ -91,7 +128,8 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         colsample_bytree=0.8,
         random_state=42,
         n_jobs=-1,
-        eval_metric='rmse'
+        eval_metric='rmse',
+        monotone_constraints=monotone_constraints
     )
 
     # Perform k-fold cross-validation

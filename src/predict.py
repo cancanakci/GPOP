@@ -95,6 +95,9 @@ def predict(model, input_df):
     # Make prediction
     prediction = model.predict(input_df)
     
+    # Clamp predictions below 0 to 0
+    prediction = np.maximum(prediction, 0)
+    
     # Debug information
     print("Raw prediction:", prediction)
     print("Prediction shape:", prediction.shape)
