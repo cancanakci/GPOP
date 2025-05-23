@@ -317,7 +317,7 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
                 iqr_upper = train_q3 + 1.5 * train_iqr
 
                 input_data[feature] = st.number_input(
-                    f"{feature} (Typical Range: {iqr_lower:.2f} - {iqr_upper:.2f})",
+                    f"{feature} (IQR Range: {iqr_lower:.2f} - {iqr_upper:.2f})",
                     value=0.0,
                     format="%.4f",
                     key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_input_{feature}"
