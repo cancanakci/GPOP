@@ -10,19 +10,21 @@ import json
 from datetime import datetime
 from plotly.subplots import make_subplots
 
-def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None):
+def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
     is_single_prediction = warning_flags_df is not None and len(warning_flags_df) == 1
 
     if red_warnings:
         st.error("⚠️ Warning: The following features have values outside the training data range. This is usually caused by mismatched units, NaN inputs or mismatched features. Please verify values:")
         for feature in red_warnings:
-            st.write(f"- {feature}")
+            ranges = warning_ranges[feature]
+            st.write(f"- {feature} (Training Range: {ranges['min']:.2f} - {ranges['max']:.2f})")
 
     if yellow_warnings:
         st.warning("⚠️ Note: The following features have values outside the typical interquartile range. Please verify values:")
         for feature in yellow_warnings:
-            st.write(f"- {feature}")
+            ranges = warning_ranges[feature]
+            st.write(f"- {feature} (IQR Range: {ranges['iqr_lower']:.2f} - {ranges['iqr_upper']:.2f})")
 
     if warning_flags_df is not None and not is_single_prediction:
         # Display summary of warnings only for batch predictions
@@ -319,14 +321,14 @@ def main():
                     training_data = joblib.load(os.path.join("models", "default_training_data.pkl"))
 
                     # Check input values and get warnings
-                    warning_flags_df, yellow_warnings, red_warnings = check_input_values(input_df, training_data)
+                    warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
 
                     # Scale the features
                     scaled_input_features = scaler.transform(input_df)
                     scaled_input_df = pd.DataFrame(scaled_input_features, columns=feature_names)
 
                     # Display warnings if any
-                    display_input_warnings(yellow_warnings, red_warnings, warning_flags_df)
+                    display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
 
                     # Make prediction
                     prediction_value = predict(model, scaled_input_df)
@@ -357,7 +359,7 @@ def main():
                             training_data = joblib.load(os.path.join("models", "default_training_data.pkl"))
 
                             # Check input values and get warnings
-                            warning_flags_df, yellow_warnings, red_warnings = check_input_values(input_df, training_data)
+                            warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
 
                             # Scale the features
                             scaled_input_features = scaler.transform(input_df)
@@ -380,7 +382,7 @@ def main():
                             st.success("Predictions completed!")
                             
                             # Display warnings
-                            display_input_warnings(yellow_warnings, red_warnings, warning_flags_df)
+                            display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
                             
                             st.write("Prediction Results:")
                             st.dataframe(results_df)
@@ -609,7 +611,7 @@ def main():
                                 training_data = st.session_state.get('new_model_training_data')
                                 
                                 # Check input values and get warnings
-                                warning_flags_df, yellow_warnings, red_warnings = check_input_values(input_df, training_data)
+                                warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
 
                                 scaled_input_features = scaler.transform(input_df)
                                 scaled_input_df = pd.DataFrame(scaled_input_features, columns=feature_names)
@@ -617,7 +619,7 @@ def main():
                                 
 
                                 # Display warnings if any
-                                display_input_warnings(yellow_warnings, red_warnings, warning_flags_df)
+                                display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
 
                                 st.success(f"Predicted Power Output: {prediction_value[0]:.2f} MW")
 
@@ -639,7 +641,7 @@ def main():
                                         training_data = st.session_state.get('new_model_training_data')
 
                                         # Check input values and get warnings
-                                        warning_flags_df, yellow_warnings, red_warnings = check_input_values(input_df, training_data)
+                                        warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
 
                                         scaled_input_features = scaler.transform(input_df)
                                         scaled_input_df = pd.DataFrame(scaled_input_features, columns=feature_names)
@@ -649,7 +651,7 @@ def main():
                                         st.success("Predictions completed!")
 
                                         # Display warnings
-                                        display_input_warnings(yellow_warnings, red_warnings, warning_flags_df)
+                                        display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
 
                                         st.write("Prediction Results:")
                                         st.dataframe(results_df)

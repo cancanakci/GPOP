@@ -11,13 +11,15 @@ def check_input_values(input_df, training_data):
         training_data: Dictionary containing training data statistics (unscaled)
         
     Returns:
-        tuple: (warning_flags_df, yellow_warnings, red_warnings) where:
+        tuple: (warning_flags_df, yellow_warnings, red_warnings, warning_ranges) where:
             - warning_flags_df is a DataFrame with boolean flags for each row and feature
             - yellow_warnings is a list of feature names with any yellow warnings
             - red_warnings is a list of feature names with any red warnings
+            - warning_ranges is a dict with min/max and IQR ranges for features with warnings
     """
     yellow_warnings = []
     red_warnings = []
+    warning_ranges = {}
     
     # Get training data statistics from the unscaled X_train
     X_train = training_data['X_train']
@@ -36,6 +38,14 @@ def check_input_values(input_df, training_data):
         train_q1 = X_train[feature].quantile(0.25)
         train_q3 = X_train[feature].quantile(0.75)
         train_iqr = train_q3 - train_q1
+        
+        # Store ranges for features with warnings
+        warning_ranges[feature] = {
+            'min': train_min,
+            'max': train_max,
+            'iqr_lower': train_q1 - 1.5 * train_iqr,
+            'iqr_upper': train_q3 + 1.5 * train_iqr
+        }
         
         # Check input values for each row
         for index, row in input_df.iterrows():
@@ -62,7 +72,7 @@ def check_input_values(input_df, training_data):
         'yellow_warning_features': yellow_flags.apply(lambda x: x[x].index.tolist(), axis=1)
     })
     
-    return warning_flags_df, yellow_warnings, red_warnings
+    return warning_flags_df, yellow_warnings, red_warnings, warning_ranges
 
 def load_model(model_path):
     return joblib.load(model_path)
