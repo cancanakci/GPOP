@@ -716,14 +716,32 @@ def main():
                     st.write("Basic Statistics:")
                     st.dataframe(df.describe())
 
-                    target_column = df.columns[-1]
+                    # User picks target, start date, frequency
+                    st.subheader("Time Series Settings for Training Data")
+                    target_col = st.selectbox(
+                        "Select Target Column",
+                        df.columns.tolist(),
+                        index=len(df.columns) - 1,  # Default to last column
+                        key="train_target_col"
+                    )
+                    start_date = st.date_input("Start Date", value=datetime.now().date(), key="train_start_date")
+                    frequency = st.selectbox(
+                        "Measurement Frequency",
+                        ["1min", "5min", "15min", "30min", "1H", "2H", "4H", "6H", "8H", "12H", "1D"],
+                        index=4,
+                        key="train_frequency"
+                    )
+                    n_samples = len(df)
+                    date_range = pd.date_range(start=start_date, periods=n_samples, freq=frequency)
+                    df.index = date_range
+
                     training_data_for_viz = {
-                        'X_train': df.drop(target_column, axis=1),
-                        'X_test': df.drop(target_column, axis=1).iloc[:len(df)//5],
-                        'y_train': df[target_column],
-                        'y_test': df[target_column].iloc[:len(df)//5],
-                        'feature_names': df.drop(target_column, axis=1).columns.tolist(),
-                        'target_column': target_column
+                        'X_train': df.drop(target_col, axis=1),
+                        'X_test': df.drop(target_col, axis=1).iloc[:len(df)//5],
+                        'y_train': df[target_col],
+                        'y_test': df[target_col].iloc[:len(df)//5],
+                        'feature_names': df.drop(target_col, axis=1).columns.tolist(),
+                        'target_column': target_col
                     }
 
                     # Add hyperparameter tuning section
@@ -815,128 +833,134 @@ def main():
             display_model_metrics(metrics)
 
     with tab2:
-        st.title("Time Series Analysis")
-        
-        # Load the default model's training data
-        try:
-            default_data = pd.read_excel("data/default_data.xlsx")
-            # Always generate datetime index for default data
-            start_datetime = pd.Timestamp("2023-01-01 20:00")
-            freq = '1H'
-            default_data.index = pd.date_range(start=start_datetime, periods=len(default_data), freq=freq)
+        # Only show time series analysis if a model is available
+        show_time_series = True
+        if model_option == "Train New Model" and not st.session_state.get('new_model_trained', False):
+            show_time_series = False
+            st.warning("Please train a new model first to use Time Series Analysis.")
+        if show_time_series:
+            st.title("Time Series Analysis")
+            
+            # Load the default model's training data
+            try:
+                default_data = pd.read_excel("data/default_data.xlsx")
+                # Always generate datetime index for default data
+                start_datetime = pd.Timestamp("2023-01-01 20:00")
+                freq = '1H'
+                default_data.index = pd.date_range(start=start_datetime, periods=len(default_data), freq=freq)
 
-            # Always use the last column as the target for the default dataset
-            target_col = default_data.columns[-1]
+                # Always use the last column as the target for the default dataset
+                target_col = default_data.columns[-1]
 
-            # Display data preview
-            st.write("Default Model Training Data Preview:")
-            st.dataframe(default_data.head())
+                # Display data preview
+                st.write("Default Model Training Data Preview:")
+                st.dataframe(default_data.head())
 
-            # Feature selection (excluding target)
-            st.subheader("Feature Selection")
-            available_features = [col for col in default_data.columns if col != target_col]
-            selected_features = st.multiselect(
-                "Select Features",
-                available_features,
-                default=available_features
-            )
+                # Feature selection (excluding target)
+                st.subheader("Feature Selection")
+                available_features = [col for col in default_data.columns if col != target_col]
+                selected_features = st.multiselect(
+                    "Select Features",
+                    available_features,
+                    default=available_features
+                )
 
-            if selected_features:
-                # Configure trends
-                st.subheader("Feature Trends")
-                years = st.slider("Number of years to project", 1, 30, 10)
+                if selected_features:
+                    # Configure trends
+                    st.subheader("Feature Trends")
+                    years = st.slider("Number of years to project", 1, 30, 10)
 
-                feature_trends = {}
-                for feature in selected_features:
-                    st.write(f"### {feature}")
-                    trend_type = st.selectbox(
-                        f"Trend type for {feature}",
-                        ["Constant", "Linear", "Exponential", "Polynomial"],
-                        key=f"trend_{feature}"
-                    )
+                    feature_trends = {}
+                    for feature in selected_features:
+                        st.write(f"### {feature}")
+                        trend_type = st.selectbox(
+                            f"Trend type for {feature}",
+                            ["Constant", "Linear", "Exponential", "Polynomial"],
+                            key=f"trend_{feature}"
+                        )
 
-                    if trend_type != "Constant":
-                        if trend_type == "Linear":
-                            slope = st.number_input(
-                                f"Annual change for {feature} (%)",
-                                value=0.0,
-                                format="%.2f",
-                                key=f"slope_{feature}"
-                            )
-                            feature_trends[feature] = {
-                                'type': 'linear',
-                                'params': {'slope': slope / 100}  # Convert percentage to decimal
-                            }
-
-                        elif trend_type == "Exponential":
-                            growth_rate = st.number_input(
-                                f"Annual growth rate for {feature} (%)",
-                                value=0.0,
-                                format="%.2f",
-                                key=f"growth_{feature}"
-                            )
-                            feature_trends[feature] = {
-                                'type': 'exponential',
-                                'params': {'growth_rate': growth_rate / 100}  # Convert percentage to decimal
-                            }
-
-                        elif trend_type == "Polynomial":
-                            degree = st.slider(
-                                f"Polynomial degree for {feature}",
-                                2, 5,
-                                key=f"degree_{feature}"
-                            )
-                            coefficients = []
-                            for i in range(degree):
-                                coef = st.number_input(
-                                    f"Coefficient for x^{i}",
+                        if trend_type != "Constant":
+                            if trend_type == "Linear":
+                                slope = st.number_input(
+                                    f"Annual change for {feature} (%)",
                                     value=0.0,
                                     format="%.2f",
-                                    key=f"coef_{feature}_{i}"
+                                    key=f"slope_{feature}"
                                 )
-                                coefficients.append(coef)
-                            feature_trends[feature] = {
-                                'type': 'polynomial',
-                                'params': {'coefficients': coefficients}
-                            }
+                                feature_trends[feature] = {
+                                    'type': 'linear',
+                                    'params': {'slope': slope / 100}  # Convert percentage to decimal
+                                }
 
-                if st.button("Generate Scenario"):
-                    # Create scenario dataframe with extrapolated features (exclude target)
-                    scenario_features = create_scenario_dataframe(default_data[selected_features], years, feature_trends)
-                    scenario_data = scenario_features.copy()
+                            elif trend_type == "Exponential":
+                                growth_rate = st.number_input(
+                                    f"Annual growth rate for {feature} (%)",
+                                    value=0.0,
+                                    format="%.2f",
+                                    key=f"growth_{feature}"
+                                )
+                                feature_trends[feature] = {
+                                    'type': 'exponential',
+                                    'params': {'growth_rate': growth_rate / 100}  # Convert percentage to decimal
+                                }
 
-                    model, scaler, feature_names = load_default_model("models")
-                    if model and scaler:
-                        # Prepare data for prediction
-                        X_all = scenario_data[selected_features]
-                        X_scaled = scaler.transform(X_all)
-                        predictions = model.predict(X_scaled)
+                            elif trend_type == "Polynomial":
+                                degree = st.slider(
+                                    f"Polynomial degree for {feature}",
+                                    2, 5,
+                                    key=f"degree_{feature}"
+                                )
+                                coefficients = []
+                                for i in range(degree):
+                                    coef = st.number_input(
+                                        f"Coefficient for x^{i}",
+                                        value=0.0,
+                                        format="%.2f",
+                                        key=f"coef_{feature}_{i}"
+                                    )
+                                    coefficients.append(coef)
+                                feature_trends[feature] = {
+                                    'type': 'polynomial',
+                                    'params': {'coefficients': coefficients}
+                                }
 
-                        # For historical part, use original target; for future, use predictions
-                        n_hist = len(default_data)
-                        scenario_data[target_col] = np.concatenate([
-                            default_data[target_col].values,
-                            predictions[n_hist:]
-                        ])
+                    if st.button("Generate Scenario"):
+                        # Create scenario dataframe with extrapolated features (exclude target)
+                        scenario_features = create_scenario_dataframe(default_data[selected_features], years, feature_trends)
+                        scenario_data = scenario_features.copy()
 
-                        # Display results
-                        st.subheader("Feature Trends and Power Predictions")
-                        st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+                        model, scaler, feature_names = load_default_model("models")
+                        if model and scaler:
+                            # Prepare data for prediction
+                            X_all = scenario_data[selected_features]
+                            X_scaled = scaler.transform(X_all)
+                            predictions = model.predict(X_scaled)
 
-                        # Add download button for scenario data
-                        csv = scenario_data.to_csv()
-                        st.download_button(
-                            label="Download scenario data as CSV",
-                            data=csv,
-                            file_name="scenario_predictions.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.error("Failed to load the default model. Please ensure the model files exist.")
+                            # For historical part, use original target; for future, use predictions
+                            n_hist = len(default_data)
+                            scenario_data[target_col] = np.concatenate([
+                                default_data[target_col].values,
+                                predictions[n_hist:]
+                            ])
 
-        except Exception as e:
-            st.error(f"Error loading default model data: {str(e)}")
-            st.error("Please ensure the default model training data exists at 'data/default_data.xlsx'")
+                            # Display results
+                            st.subheader("Feature Trends and Power Predictions")
+                            st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+
+                            # Add download button for scenario data
+                            csv = scenario_data.to_csv()
+                            st.download_button(
+                                label="Download scenario data as CSV",
+                                data=csv,
+                                file_name="scenario_predictions.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to load the default model. Please ensure the model files exist.")
+
+            except Exception as e:
+                st.error(f"Error loading default model data: {str(e)}")
+                st.error("Please ensure the default model training data exists at 'data/default_data.xlsx'")
 
 if __name__ == "__main__":
     main()
