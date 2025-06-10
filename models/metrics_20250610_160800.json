@@ -1,5 +1,5 @@
 {
-    "timestamp": "20250523_234142",
+    "timestamp": "20250610_160800",
     "model_type": "XGBoost",
     "metrics": {
         "mse": 0.34761462515842134,
@@ -483,7 +483,7 @@
         "Heat Exchanger Pressure Differential (Bar)",
         "Reinjection Temperature (\u00b0C)"
     ],
-    "plot_path": "models/actual_vs_predicted_20250523_234142.png",
+    "plot_path": "models/actual_vs_predicted_20250610_160800.png",
     "actual": [
         25.09971559047699,
         36.272257804870605,
@@ -3992,5 +3992,5 @@
         48.97223663330078,
         36.57819366455078
     ],
-    "training_data_path": "models/training_data_20250523_234142.pkl"
+    "training_data_path": "models/training_data_20250610_160800.pkl"
 }

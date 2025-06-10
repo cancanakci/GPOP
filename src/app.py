@@ -533,6 +533,43 @@ def main():
                     'target_column': target_column
                 }
 
+                # Add hyperparameter tuning section
+                st.subheader("Model Hyperparameters")
+                st.write("Adjust the model hyperparameters below (optional):")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    n_estimators = st.slider("Number of Trees (n_estimators)", 
+                                          min_value=50, max_value=500, 
+                                          value=200, step=50)
+                    learning_rate = st.slider("Learning Rate", 
+                                           min_value=0.01, max_value=0.3, 
+                                           value=0.05, step=0.01)
+                    max_depth = st.slider("Maximum Tree Depth", 
+                                       min_value=3, max_value=10, 
+                                       value=6, step=1)
+                
+                with col2:
+                    min_child_weight = st.slider("Minimum Child Weight", 
+                                              min_value=1, max_value=10, 
+                                              value=1, step=1)
+                    subsample = st.slider("Subsample Ratio", 
+                                       min_value=0.5, max_value=1.0, 
+                                       value=0.8, step=0.1)
+                    colsample_bytree = st.slider("Column Sample by Tree", 
+                                              min_value=0.5, max_value=1.0, 
+                                              value=0.8, step=0.1)
+
+                # Store hyperparameters in session state
+                st.session_state['model_params'] = {
+                    'n_estimators': n_estimators,
+                    'learning_rate': learning_rate,
+                    'max_depth': max_depth,
+                    'min_child_weight': min_child_weight,
+                    'subsample': subsample,
+                    'colsample_bytree': colsample_bytree
+                }
+
                 if 'new_model_metrics' not in st.session_state:
                     st.session_state['new_model_metrics'] = None
                 if 'new_model_trained' not in st.session_state:
@@ -541,7 +578,9 @@ def main():
                 if st.button("Train New Model"):
                     try:
                         from train import train_model
-                        metrics = train_model(training_file, models_dir)
+                        # Get custom hyperparameters from session state if available
+                        model_params = st.session_state.get('model_params')
+                        metrics = train_model(training_file, models_dir, model_params=model_params)
                         model, scaler, feature_names = load_latest_model_files(models_dir)
                         st.success("New model trained and loaded successfully!")
                         cleanup_old_models(models_dir)

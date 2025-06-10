@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 
-def train_model(data_path, models_dir, target_column=None, n_splits=5, is_default=False):
+def train_model(data_path, models_dir, target_column=None, n_splits=5, is_default=False, model_params=None):
     """Loads data, preprocesses it, trains XGBoost model with cross-validation, and saves model with metrics."""
     
     # Create timestamp for model versioning
@@ -81,18 +81,26 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
 
     # --- Model Training and Evaluation ---
     print("\nTraining XGBoostRegressor...")
-    xgb_model = xgb.XGBRegressor(
-        objective='reg:squarederror',
-        n_estimators=200,
-        learning_rate=0.05,
-        max_depth=6,
-        min_child_weight=1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        n_jobs=-1,
-        eval_metric='rmse'
-    )
+    
+    # Use custom parameters if provided, otherwise use defaults
+    default_params = {
+        'objective': 'reg:squarederror',
+        'n_estimators': 200,
+        'learning_rate': 0.05,
+        'max_depth': 6,
+        'min_child_weight': 1,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
+        'random_state': 42,
+        'n_jobs': -1,
+        'eval_metric': 'rmse'
+    }
+    
+    # Update default parameters with custom parameters if provided
+    if model_params:
+        default_params.update(model_params)
+    
+    xgb_model = xgb.XGBRegressor(**default_params)
 
     # Perform k-fold cross-validation
     print(f"\nPerforming {n_splits}-fold cross-validation...")
