@@ -15,7 +15,6 @@ import os
 import json
 from datetime import datetime
 from plotly.subplots import make_subplots
-import torch
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
