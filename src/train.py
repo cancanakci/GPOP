@@ -1,5 +1,5 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split, KFold, cross_val_score
+from sklearn.model_selection import train_test_split, KFold, cross_val_score, GridSearchCV
 from sklearn.metrics import mean_squared_error, r2_score, make_scorer
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -96,6 +96,48 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         'eval_metric': 'rmse'
     }
     
+    if is_default:
+        # Define parameter grid for grid search
+        param_grid = {
+            'n_estimators': [100, 200, 300],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'max_depth': [4, 6, 8],
+            'min_child_weight': [1, 3, 5],
+            'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0]
+        }
+        
+        # Create base model for grid search
+        base_model = xgb.XGBRegressor(
+            objective='reg:squarederror',
+            random_state=42,
+            n_jobs=-1,
+            eval_metric='rmse'
+        )
+        
+        # Perform grid search with cross-validation
+        print("Performing grid search for optimal hyperparameters...")
+        grid_search = GridSearchCV(
+            estimator=base_model,
+            param_grid=param_grid,
+            cv=5,
+            scoring='neg_root_mean_squared_error',
+            n_jobs=-1,
+            verbose=1
+        )
+        
+        grid_search.fit(X_train_scaled, y_train)
+        
+        # Get best parameters
+        best_params = grid_search.best_params_
+        print(f"Best parameters found: {best_params}")
+        
+        # Update default parameters with best parameters
+        default_params.update(best_params)
+        
+        # Add early stopping
+        default_params['early_stopping_rounds'] = 50
+    
     # Update default parameters with custom parameters if provided
     if model_params:
         default_params.update(model_params)
@@ -116,9 +158,19 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     print(f"Mean CV RMSE: {cv_rmse_scores.mean():.4f} (+/- {cv_rmse_scores.std() * 2:.4f})")
 
     # Train final model on full training set
-    xgb_model.fit(X_train_scaled, y_train, 
-                 eval_set=[(X_train_scaled, y_train), (X_test_scaled, y_test)],
-                 verbose=False)
+    if is_default:
+        # Use early stopping for default model
+        xgb_model.fit(
+            X_train_scaled, y_train,
+            eval_set=[(X_train_scaled, y_train), (X_test_scaled, y_test)],
+            verbose=False
+        )
+    else:
+        xgb_model.fit(
+            X_train_scaled, y_train,
+            eval_set=[(X_train_scaled, y_train), (X_test_scaled, y_test)],
+            verbose=False
+        )
     
     # Get training history
     results = xgb_model.evals_result()
@@ -195,6 +247,13 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         'predicted': xgb_preds.tolist(),
         'training_data_path': training_data_path
     }
+    
+    if is_default:
+        metrics['grid_search_results'] = {
+            'best_params': grid_search.best_params_,
+            'best_score': float(grid_search.best_score_),
+            'cv_results': grid_search.cv_results_
+        }
     
     # Save metrics to JSON file
     with open(metrics_path, 'w') as f:

@@ -5,10 +5,20 @@ import plotly.express as px
 import plotly.graph_objects as go
 from predict import load_model, predict, check_input_values
 from data_prep import load_data, preprocess_data
+from time_series_analysis import (
+    create_scenario_dataframe,
+    plot_scenario,
+    calculate_power_predictions,
+    plot_power_predictions
+)
 import os
 import json
 from datetime import datetime
 from plotly.subplots import make_subplots
+import torch
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score
+import numpy as np
 
 def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
@@ -423,7 +433,6 @@ def display_model_metrics(metrics):
              st.sidebar.write(f"RMSE: {test_metrics.get('rmse', 0.0):.4f}")
              st.sidebar.write(f"MSE: {test_metrics.get('mse', 0.0):.4f}")
 
-
         cv_metrics = metrics.get('metrics', {}).get('cv_metrics', {})
         if cv_metrics:
             st.sidebar.write("Cross-validation Performance:")
@@ -441,6 +450,15 @@ def display_model_metrics(metrics):
                      st.write("RMSE Scores per fold:")
                      for i, score in enumerate(rmse_scores, 1):
                         st.write(f"Fold {i}: {score:.4f}")
+
+        # Display grid search results if available
+        grid_search_results = metrics.get('grid_search_results')
+        if grid_search_results:
+            st.sidebar.subheader("Grid Search Results")
+            st.sidebar.write("Best Parameters:")
+            for param, value in grid_search_results['best_params'].items():
+                st.sidebar.write(f"- {param}: {value}")
+            st.sidebar.write(f"Best RMSE Score: {-grid_search_results['best_score']:.4f}")
 
         with st.sidebar.expander("Model Parameters"):
             model_params = metrics.get('model_params', {})
@@ -479,6 +497,177 @@ def display_model_metrics(metrics):
     else:
         st.sidebar.warning("No model metrics found.")
 
+def create_scenario_dataframe(historical_df, years, feature_trends):
+    """Create a scenario dataframe by extrapolating historical patterns and applying trends."""
+    # Calculate number of periods to generate
+    freq = historical_df.index.freq
+    periods = int(years * 365.25 * 24 / pd.Timedelta(freq).total_seconds() * 3600)
+    
+    # Create future date range
+    future_dates = pd.date_range(
+        start=historical_df.index[-1] + pd.Timedelta(freq),
+        periods=periods,
+        freq=freq
+    )
+    
+    # Initialize future dataframe
+    future_df = pd.DataFrame(index=future_dates)
+    
+    # For each feature, extrapolate the pattern and apply trends
+    for feature in historical_df.columns:
+        if feature in feature_trends:
+            # Get the trend configuration
+            trend = feature_trends[feature]
+            
+            # Get the historical pattern (last year of data)
+            historical_pattern = historical_df[feature].iloc[-int(365.25 * 24 / pd.Timedelta(freq).total_seconds() * 3600):]
+            
+            # Create the base pattern by repeating the historical pattern
+            base_pattern = np.tile(historical_pattern.values, int(np.ceil(periods / len(historical_pattern))))
+            base_pattern = base_pattern[:periods]  # Trim to exact length needed
+            
+            # Apply the trend modifier
+            if trend['type'] == 'linear':
+                # Create linear trend
+                trend_factor = 1 + np.linspace(0, trend['params']['slope'] * years, periods)
+                future_df[feature] = base_pattern * trend_factor
+                
+            elif trend['type'] == 'exponential':
+                # Create exponential trend
+                trend_factor = np.exp(np.linspace(0, trend['params']['growth_rate'] * years, periods))
+                future_df[feature] = base_pattern * trend_factor
+                
+            elif trend['type'] == 'polynomial':
+                # Create polynomial trend
+                x = np.linspace(0, years, periods)
+                trend_factor = np.polyval(trend['params']['coefficients'], x)
+                future_df[feature] = base_pattern * trend_factor
+                
+        else:
+            # For features without trends, just repeat the historical pattern
+            historical_pattern = historical_df[feature].iloc[-int(365.25 * 24 / pd.Timedelta(freq).total_seconds() * 3600):]
+            future_df[feature] = np.tile(historical_pattern.values, int(np.ceil(periods / len(historical_pattern))))[:periods]
+    
+    # Combine historical and future data
+    scenario_df = pd.concat([historical_df, future_df])
+    
+    return scenario_df
+
+def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
+    """
+    Plot the scenario data with separate subplots for each feature.
+    The target plot is emphasized with a taller y-axis and a clear label.
+    Modifiers are shown above the plots.
+    """
+    # Show modifiers summary
+    if feature_trends:
+        st.markdown("**Applied Modifiers:**")
+        for feature, trend in feature_trends.items():
+            if trend['type'] == 'linear':
+                st.write(f"- {feature}: Linear ({trend['params']['slope']*100:.2f}% per year)")
+            elif trend['type'] == 'exponential':
+                st.write(f"- {feature}: Exponential ({trend['params']['growth_rate']*100:.2f}% per year)")
+            elif trend['type'] == 'polynomial':
+                st.write(f"- {feature}: Polynomial (coefficients: {trend['params']['coefficients']})")
+            else:
+                st.write(f"- {feature}: Constant")
+
+    # Define color pairs for features
+    color_pairs = [
+        ('blue', 'lightblue'),
+        ('red', 'lightcoral'),
+        ('green', 'lightgreen'),
+        ('purple', 'plum'),
+        ('orange', 'peachpuff'),
+        ('brown', 'burlywood'),
+        ('pink', 'lightpink'),
+        ('cyan', 'lightcyan'),
+        ('magenta', 'lavender'),
+        ('olive', 'beige')
+    ]
+
+    # Separate target from features
+    features = [col for col in scenario_data.columns if col != target_col]
+    n_features = len(features)
+    total_rows = n_features + 1  # +1 for target
+
+    # Create subplots: target plot is first and taller
+    row_heights = [0.5] + [0.5 / n_features] * n_features  # Target plot is 50% height, others share the rest
+    fig = make_subplots(
+        rows=total_rows,
+        cols=1,
+        subplot_titles=[f"Predicted {target_col}"] + features,
+        row_heights=row_heights,
+        vertical_spacing=0.08
+    )
+
+    # Get the split point between historical and future data
+    split_date = scenario_data.index[-int(years * 365.25 * 24 / pd.Timedelta(scenario_data.index.freq).total_seconds() * 3600)]
+
+    # Plot target (emphasized)
+    actual_color, future_color = color_pairs[0]
+    historical_target = scenario_data[target_col][:split_date]
+    future_target = scenario_data[target_col][split_date:]
+    fig.add_trace(
+        go.Scatter(
+            x=historical_target.index,
+            y=historical_target.values,
+            name=f'{target_col} (Historical)',
+            line=dict(color=actual_color, width=3)
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=future_target.index,
+            y=future_target.values,
+            name=f'{target_col} (Predicted)',
+            line=dict(color=future_color, dash='dash', width=3)
+        ),
+        row=1,
+        col=1
+    )
+
+    # Plot each feature in its own subplot
+    for i, feature in enumerate(features, 2):
+        actual_color, future_color = color_pairs[i % len(color_pairs)]
+        historical_data = scenario_data[feature][:split_date]
+        future_data = scenario_data[feature][split_date:]
+        fig.add_trace(
+            go.Scatter(
+                x=historical_data.index,
+                y=historical_data.values,
+                name=f'{feature} (Historical)',
+                line=dict(color=actual_color)
+            ),
+            row=i,
+            col=1
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=future_data.index,
+                y=future_data.values,
+                name=f'{feature} (Projected)',
+                line=dict(color=future_color, dash='dash')
+            ),
+            row=i,
+            col=1
+        )
+
+    # Update layout
+    fig.update_layout(
+        title=f'Feature Trends and {target_col} Prediction',
+        height=400 + 200 * n_features,  # Target plot is taller
+        showlegend=True,
+        hovermode='x unified'
+    )
+    # Emphasize y-axis for target
+    fig.update_yaxes(title_text=target_col, row=1, col=1)
+    for i, feature in enumerate(features, 2):
+        fig.update_yaxes(title_text=feature, row=i, col=1)
+    return fig
+
 def main():
     # Set page configuration
     st.set_page_config(
@@ -489,137 +678,265 @@ def main():
 
     st.title("Geothermal Power Output Prediction")
 
-    # Add model selection in sidebar
-    st.sidebar.title("Model Options")
-    model_option = st.sidebar.radio(
-        "Choose an option:",
-        ["Use Default Model", "Train New Model"]
-    )
+    # Add tabs for different functionalities
+    tab1, tab2 = st.tabs(["Model Training & Prediction", "Time Series Analysis"])
 
-    models_dir = "models"
+    with tab1:
+        # Add model selection in sidebar
+        st.sidebar.title("Model Options")
+        model_option = st.sidebar.radio(
+            "Choose an option:",
+            ["Use Default Model", "Train New Model"]
+        )
 
-    if model_option == "Train New Model":
-        st.write("Upload your data to train a new model.")
-        training_file = st.file_uploader("Upload training data (CSV or Excel)", type=['csv', 'xlsx'], key="training_file")
+        models_dir = "models"
 
-        if training_file is not None:
-            try:
-                df = load_data(training_file)
-                st.success("File loaded successfully!")
+        if model_option == "Train New Model":
+            st.write("Upload your data to train a new model.")
+            training_file = st.file_uploader("Upload training data (CSV or Excel)", type=['csv', 'xlsx'], key="training_file")
 
-                st.write("Data Preview:")
-                st.dataframe(df.head())
+            if training_file is not None:
+                try:
+                    df = load_data(training_file)
+                    st.success("File loaded successfully!")
 
-                st.write("Dataset Information:")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"Number of rows: {len(df)}")
-                    st.write(f"Number of features: {len(df.columns)}")
-                with col2:
-                    st.write("Feature names:")
-                    for col in df.columns:
-                        st.write(f"- {col}")
+                    st.write("Data Preview:")
+                    st.dataframe(df.head())
 
-                st.write("Basic Statistics:")
-                st.dataframe(df.describe())
+                    st.write("Dataset Information:")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"Number of rows: {len(df)}")
+                        st.write(f"Number of features: {len(df.columns)}")
+                    with col2:
+                        st.write("Feature names:")
+                        for col in df.columns:
+                            st.write(f"- {col}")
 
-                target_column = df.columns[-1]
-                training_data_for_viz = {
-                    'X_train': df.drop(target_column, axis=1),
-                    'X_test': df.drop(target_column, axis=1).iloc[:len(df)//5],
-                    'y_train': df[target_column],
-                    'y_test': df[target_column].iloc[:len(df)//5],
-                    'feature_names': df.drop(target_column, axis=1).columns.tolist(),
-                    'target_column': target_column
-                }
+                    st.write("Basic Statistics:")
+                    st.dataframe(df.describe())
 
-                # Add hyperparameter tuning section
-                st.subheader("Model Hyperparameters")
-                st.write("Adjust the model hyperparameters below (optional):")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    n_estimators = st.slider("Number of Trees (n_estimators)", 
-                                          min_value=50, max_value=500, 
-                                          value=200, step=50)
-                    learning_rate = st.slider("Learning Rate", 
-                                           min_value=0.01, max_value=0.3, 
-                                           value=0.05, step=0.01)
-                    max_depth = st.slider("Maximum Tree Depth", 
-                                       min_value=3, max_value=10, 
-                                       value=6, step=1)
-                
-                with col2:
-                    min_child_weight = st.slider("Minimum Child Weight", 
-                                              min_value=1, max_value=10, 
-                                              value=1, step=1)
-                    subsample = st.slider("Subsample Ratio", 
-                                       min_value=0.5, max_value=1.0, 
-                                       value=0.8, step=0.1)
-                    colsample_bytree = st.slider("Column Sample by Tree", 
-                                              min_value=0.5, max_value=1.0, 
-                                              value=0.8, step=0.1)
+                    target_column = df.columns[-1]
+                    training_data_for_viz = {
+                        'X_train': df.drop(target_column, axis=1),
+                        'X_test': df.drop(target_column, axis=1).iloc[:len(df)//5],
+                        'y_train': df[target_column],
+                        'y_test': df[target_column].iloc[:len(df)//5],
+                        'feature_names': df.drop(target_column, axis=1).columns.tolist(),
+                        'target_column': target_column
+                    }
 
-                # Store hyperparameters in session state
-                st.session_state['model_params'] = {
-                    'n_estimators': n_estimators,
-                    'learning_rate': learning_rate,
-                    'max_depth': max_depth,
-                    'min_child_weight': min_child_weight,
-                    'subsample': subsample,
-                    'colsample_bytree': colsample_bytree
-                }
+                    # Add hyperparameter tuning section
+                    st.subheader("Model Hyperparameters")
+                    st.write("Adjust the model hyperparameters below (optional):")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        n_estimators = st.slider("Number of Trees (n_estimators)", 
+                                              min_value=50, max_value=500, 
+                                              value=200, step=50)
+                        learning_rate = st.slider("Learning Rate", 
+                                               min_value=0.01, max_value=0.3, 
+                                               value=0.05, step=0.01)
+                        max_depth = st.slider("Maximum Tree Depth", 
+                                           min_value=3, max_value=10, 
+                                           value=6, step=1)
+                    
+                    with col2:
+                        min_child_weight = st.slider("Minimum Child Weight", 
+                                                  min_value=1, max_value=10, 
+                                                  value=1, step=1)
+                        subsample = st.slider("Subsample Ratio", 
+                                           min_value=0.5, max_value=1.0, 
+                                           value=0.8, step=0.1)
+                        colsample_bytree = st.slider("Column Sample by Tree", 
+                                                  min_value=0.5, max_value=1.0, 
+                                                  value=0.8, step=0.1)
 
-                if 'new_model_metrics' not in st.session_state:
-                    st.session_state['new_model_metrics'] = None
-                if 'new_model_trained' not in st.session_state:
-                    st.session_state['new_model_trained'] = False
+                    # Store hyperparameters in session state
+                    st.session_state['model_params'] = {
+                        'n_estimators': n_estimators,
+                        'learning_rate': learning_rate,
+                        'max_depth': max_depth,
+                        'min_child_weight': min_child_weight,
+                        'subsample': subsample,
+                        'colsample_bytree': colsample_bytree
+                    }
 
-                if st.button("Train New Model"):
-                    try:
-                        from train import train_model
-                        # Get custom hyperparameters from session state if available
-                        model_params = st.session_state.get('model_params')
-                        metrics = train_model(training_file, models_dir, model_params=model_params)
-                        model, scaler, feature_names = load_latest_model_files(models_dir)
-                        st.success("New model trained and loaded successfully!")
-                        cleanup_old_models(models_dir)
-                        st.session_state['new_model_metrics'] = metrics
-                        st.session_state['new_model_trained'] = True
-                        st.session_state['new_model_training_data'] = training_data_for_viz # Store for prediction use
-                        st.session_state['new_model_scaler'] = scaler
-                        st.session_state['new_model_model'] = model
-                        st.session_state['new_model_feature_names'] = feature_names
-                    except Exception as e:
-                        st.error(f"Error training model: {str(e)}")
-            except Exception as e:
-                st.error(f"Error loading file: {str(e)}")
-        else:
-            st.info("Please upload a training data file to train a new model.")
+                    if 'new_model_metrics' not in st.session_state:
+                        st.session_state['new_model_metrics'] = None
+                    if 'new_model_trained' not in st.session_state:
+                        st.session_state['new_model_trained'] = False
 
-    # Load the selected model components
-    model, scaler, feature_names, training_data, status = load_selected_model_components(model_option, models_dir)
+                    if st.button("Train New Model"):
+                        try:
+                            from train import train_model
+                            # Get custom hyperparameters from session state if available
+                            model_params = st.session_state.get('model_params')
+                            metrics = train_model(training_file, models_dir, model_params=model_params)
+                            model, scaler, feature_names = load_latest_model_files(models_dir)
+                            st.success("New model trained and loaded successfully!")
+                            cleanup_old_models(models_dir)
+                            st.session_state['new_model_metrics'] = metrics
+                            st.session_state['new_model_trained'] = True
+                            st.session_state['new_model_training_data'] = training_data_for_viz # Store for prediction use
+                            st.session_state['new_model_scaler'] = scaler
+                            st.session_state['new_model_model'] = model
+                            st.session_state['new_model_feature_names'] = feature_names
+                        except Exception as e:
+                            st.error(f"Error training model: {str(e)}")
+                except Exception as e:
+                    st.error(f"Error loading file: {str(e)}")
+            else:
+                st.info("Please upload a training data file to train a new model.")
 
-    st.sidebar.write(status)
+        # Load the selected model components
+        model, scaler, feature_names, training_data, status = load_selected_model_components(model_option, models_dir)
 
-    if model and scaler and feature_names and training_data:
-        # Display training data visualizations
-        display_data_visualizations(training_data, model)
+        st.sidebar.write(status)
 
-        # Handle prediction workflow
-        handle_prediction_workflow(model, scaler, feature_names, training_data)
+        if model and scaler and feature_names and training_data:
+            # Display training data visualizations
+            display_data_visualizations(training_data, model)
 
-        # Load and display metrics in sidebar
-        metrics = None
-        if model_option == "Use Default Model":
-            metrics_path = os.path.join(models_dir, "default_metrics.json")
-            if os.path.exists(metrics_path):
-                with open(metrics_path, 'r') as f:
-                    metrics = json.load(f)
-        elif model_option == "Train New Model" and st.session_state.get('new_model_trained', False):
-             metrics = st.session_state.get('new_model_metrics')
+            # Handle prediction workflow
+            handle_prediction_workflow(model, scaler, feature_names, training_data)
 
-        display_model_metrics(metrics)
+            # Load and display metrics in sidebar
+            metrics = None
+            if model_option == "Use Default Model":
+                metrics_path = os.path.join(models_dir, "default_metrics.json")
+                if os.path.exists(metrics_path):
+                    with open(metrics_path, 'r') as f:
+                        metrics = json.load(f)
+            elif model_option == "Train New Model" and st.session_state.get('new_model_trained', False):
+                metrics = st.session_state.get('new_model_metrics')
+
+            display_model_metrics(metrics)
+
+    with tab2:
+        st.title("Time Series Analysis")
+        
+        # Load the default model's training data
+        try:
+            default_data = pd.read_excel("data/default_data.xlsx")
+            # Always generate datetime index for default data
+            start_datetime = pd.Timestamp("2023-01-01 20:00")
+            freq = '1H'
+            default_data.index = pd.date_range(start=start_datetime, periods=len(default_data), freq=freq)
+
+            # Always use the last column as the target for the default dataset
+            target_col = default_data.columns[-1]
+
+            # Display data preview
+            st.write("Default Model Training Data Preview:")
+            st.dataframe(default_data.head())
+
+            # Feature selection (excluding target)
+            st.subheader("Feature Selection")
+            available_features = [col for col in default_data.columns if col != target_col]
+            selected_features = st.multiselect(
+                "Select Features",
+                available_features,
+                default=available_features
+            )
+
+            if selected_features:
+                # Configure trends
+                st.subheader("Feature Trends")
+                years = st.slider("Number of years to project", 1, 30, 10)
+
+                feature_trends = {}
+                for feature in selected_features:
+                    st.write(f"### {feature}")
+                    trend_type = st.selectbox(
+                        f"Trend type for {feature}",
+                        ["Constant", "Linear", "Exponential", "Polynomial"],
+                        key=f"trend_{feature}"
+                    )
+
+                    if trend_type != "Constant":
+                        if trend_type == "Linear":
+                            slope = st.number_input(
+                                f"Annual change for {feature} (%)",
+                                value=0.0,
+                                format="%.2f",
+                                key=f"slope_{feature}"
+                            )
+                            feature_trends[feature] = {
+                                'type': 'linear',
+                                'params': {'slope': slope / 100}  # Convert percentage to decimal
+                            }
+
+                        elif trend_type == "Exponential":
+                            growth_rate = st.number_input(
+                                f"Annual growth rate for {feature} (%)",
+                                value=0.0,
+                                format="%.2f",
+                                key=f"growth_{feature}"
+                            )
+                            feature_trends[feature] = {
+                                'type': 'exponential',
+                                'params': {'growth_rate': growth_rate / 100}  # Convert percentage to decimal
+                            }
+
+                        elif trend_type == "Polynomial":
+                            degree = st.slider(
+                                f"Polynomial degree for {feature}",
+                                2, 5,
+                                key=f"degree_{feature}"
+                            )
+                            coefficients = []
+                            for i in range(degree):
+                                coef = st.number_input(
+                                    f"Coefficient for x^{i}",
+                                    value=0.0,
+                                    format="%.2f",
+                                    key=f"coef_{feature}_{i}"
+                                )
+                                coefficients.append(coef)
+                            feature_trends[feature] = {
+                                'type': 'polynomial',
+                                'params': {'coefficients': coefficients}
+                            }
+
+                if st.button("Generate Scenario"):
+                    # Create scenario dataframe with extrapolated features (exclude target)
+                    scenario_features = create_scenario_dataframe(default_data[selected_features], years, feature_trends)
+                    scenario_data = scenario_features.copy()
+
+                    model, scaler, feature_names = load_default_model("models")
+                    if model and scaler:
+                        # Prepare data for prediction
+                        X_all = scenario_data[selected_features]
+                        X_scaled = scaler.transform(X_all)
+                        predictions = model.predict(X_scaled)
+
+                        # For historical part, use original target; for future, use predictions
+                        n_hist = len(default_data)
+                        scenario_data[target_col] = np.concatenate([
+                            default_data[target_col].values,
+                            predictions[n_hist:]
+                        ])
+
+                        # Display results
+                        st.subheader("Feature Trends and Power Predictions")
+                        st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+
+                        # Add download button for scenario data
+                        csv = scenario_data.to_csv()
+                        st.download_button(
+                            label="Download scenario data as CSV",
+                            data=csv,
+                            file_name="scenario_predictions.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.error("Failed to load the default model. Please ensure the model files exist.")
+
+        except Exception as e:
+            st.error(f"Error loading default model data: {str(e)}")
+            st.error("Please ensure the default model training data exists at 'data/default_data.xlsx'")
 
 if __name__ == "__main__":
     main()
