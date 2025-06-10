@@ -873,55 +873,57 @@ def main():
                     for feature in selected_features:
                         st.write(f"### {feature}")
                         trend_type = st.selectbox(
-                            f"Trend type for {feature}",
+                            "Select Trend Type",
                             ["Constant", "Linear", "Exponential", "Polynomial"],
                             key=f"trend_{feature}"
                         )
 
                         if trend_type != "Constant":
-                            if trend_type == "Linear":
-                                slope = st.number_input(
-                                    f"Annual change for {feature} (%)",
-                                    value=0.0,
-                                    format="%.2f",
-                                    key=f"slope_{feature}"
-                                )
-                                feature_trends[feature] = {
-                                    'type': 'linear',
-                                    'params': {'slope': slope / 100}  # Convert percentage to decimal
-                                }
-
-                            elif trend_type == "Exponential":
-                                growth_rate = st.number_input(
-                                    f"Annual growth rate for {feature} (%)",
-                                    value=0.0,
-                                    format="%.2f",
-                                    key=f"growth_{feature}"
-                                )
-                                feature_trends[feature] = {
-                                    'type': 'exponential',
-                                    'params': {'growth_rate': growth_rate / 100}  # Convert percentage to decimal
-                                }
-
-                            elif trend_type == "Polynomial":
-                                degree = st.slider(
-                                    f"Polynomial degree for {feature}",
-                                    2, 5,
-                                    key=f"degree_{feature}"
-                                )
-                                coefficients = []
-                                for i in range(degree):
-                                    coef = st.number_input(
-                                        f"Coefficient for x^{i}",
+                            col1, col2 = st.columns([1, 9])
+                            with col2:
+                                if trend_type == "Linear":
+                                    slope = st.number_input(
+                                        f"Annual change for {feature} (%)",
                                         value=0.0,
                                         format="%.2f",
-                                        key=f"coef_{feature}_{i}"
+                                        key=f"slope_{feature}"
                                     )
-                                    coefficients.append(coef)
-                                feature_trends[feature] = {
-                                    'type': 'polynomial',
-                                    'params': {'coefficients': coefficients}
-                                }
+                                    feature_trends[feature] = {
+                                        'type': 'linear',
+                                        'params': {'slope': slope / 100}  # Convert percentage to decimal
+                                    }
+
+                                elif trend_type == "Exponential":
+                                    growth_rate = st.number_input(
+                                        f"Annual growth rate for {feature} (%)",
+                                        value=0.0,
+                                        format="%.2f",
+                                        key=f"growth_{feature}"
+                                    )
+                                    feature_trends[feature] = {
+                                        'type': 'exponential',
+                                        'params': {'growth_rate': growth_rate / 100}  # Convert percentage to decimal
+                                    }
+
+                                elif trend_type == "Polynomial":
+                                    degree = st.slider(
+                                        f"Polynomial degree for {feature}",
+                                        2, 5,
+                                        key=f"degree_{feature}"
+                                    )
+                                    coefficients = []
+                                    for i in range(degree):
+                                        coef = st.number_input(
+                                            f"Coefficient for x^{i}",
+                                            value=0.0,
+                                            format="%.2f",
+                                            key=f"coef_{feature}_{i}"
+                                        )
+                                        coefficients.append(coef)
+                                    feature_trends[feature] = {
+                                        'type': 'polynomial',
+                                        'params': {'coefficients': coefficients}
+                                    }
 
                     if st.button("Generate Scenario"):
                         # Create scenario dataframe with extrapolated features (exclude target)
