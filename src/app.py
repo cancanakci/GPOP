@@ -678,7 +678,7 @@ def main():
     st.title("Geothermal Power Output Prediction")
 
     # Add tabs for different functionalities
-    tab1, tab2 = st.tabs(["Model Training & Prediction", "Time Series Analysis"])
+    tab1, tab2 = st.tabs(["Model Training & Prediction", "Time Series"])
 
     with tab1:
         # Add model selection in sidebar
@@ -836,9 +836,9 @@ def main():
         show_time_series = True
         if model_option == "Train New Model" and not st.session_state.get('new_model_trained', False):
             show_time_series = False
-            st.warning("Please train a new model first to use Time Series Analysis.")
+            st.warning("Please train a new model first to use Time Series.")
         if show_time_series:
-            st.title("Time Series Analysis")
+            st.title("Time Series")
             
             # Load the default model's training data
             try:
