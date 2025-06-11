@@ -1,8 +1,9 @@
 import os
 from train import train_model
 import joblib
+import pandas as pd
 
-def create_default_model():
+def create_default_model(target_column=None):
     """Create and save the default model using the provided training data."""
     # Ensure models directory exists
     os.makedirs("models", exist_ok=True)
@@ -14,8 +15,12 @@ def create_default_model():
         raise FileNotFoundError(f"Default training data not found at {default_data_path}")
     
     try:
+        # Dynamically determine target column if not provided
+        df = pd.read_excel(default_data_path)
+        if target_column is None:
+            target_column = df.columns[-1]
         # Train the model
-        metrics = train_model(default_data_path, "models", is_default=True)
+        metrics = train_model(default_data_path, "models", target_column=target_column, is_default=True)
         print("\nDefault model created successfully!")
         print("\nModel Performance Summary:")
         print(f"R² Score: {metrics['metrics']['r2']:.4f}")

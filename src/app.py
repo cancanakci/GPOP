@@ -197,13 +197,13 @@ def display_prediction_visualizations(results_df, target_column='Target'):
     
     # Add histogram
     fig.add_trace(
-        go.Histogram(x=results_df['Predicted Power Output (MW)'], name='Histogram'),
+        go.Histogram(x=results_df[f'Predicted {target_column}'], name='Histogram'),
         row=1, col=1
     )
     
     # Add box plot
     fig.add_trace(
-        go.Box(y=results_df['Predicted Power Output (MW)'], name='Box Plot'),
+        go.Box(y=results_df[f'Predicted {target_column}'], name='Box Plot'),
         row=1, col=2
     )
     
@@ -211,20 +211,20 @@ def display_prediction_visualizations(results_df, target_column='Target'):
     fig.update_layout(
         height=400,
         showlegend=False,
-        title_text='Predicted Power Output Analysis'
+        title_text=f'Predicted {target_column} Analysis'
     )
     
     st.plotly_chart(fig, use_container_width=True)
     
     # Time series plot if there's a time column
     if 'Tarih' in results_df.columns:
-        fig = px.line(results_df, x='Tarih', y='Predicted Power Output (MW)',
-                     title='Predicted Power Output Over Time')
+        fig = px.line(results_df, x='Tarih', y=f'Predicted {target_column}',
+                     title=f'Predicted {target_column} Over Time')
         st.plotly_chart(fig, use_container_width=True)
     
     # Correlation with input features
     st.write("Feature Correlations with Predictions")
-    corr = results_df.corr()['Predicted Power Output (MW)'].sort_values(ascending=False)
+    corr = results_df.corr()[f'Predicted {target_column}'].sort_values(ascending=False)
     fig = px.bar(x=corr.index, y=corr.values,
                 title='Feature Correlations with Predictions',
                 labels={'x': 'Features', 'y': 'Correlation'})
@@ -311,14 +311,22 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
         key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_predict_method"
     )
 
+    # Get target column name from training data
+    target_column = training_data.get('target_column', 'Target')
+
+    if training_data is not None:
+        X_train = training_data['X_train']
+        # Ensure feature_names is in sync with X_train
+        feature_names = [f for f in feature_names if f in X_train.columns]
+
     if input_method == "Single Prediction":
         st.write("Enter values for prediction:")
         input_data = {}
 
         if training_data is not None:
-            X_train = training_data['X_train']
-
             for feature in feature_names:
+                if feature not in X_train.columns:
+                    continue
                 train_q1 = X_train[feature].quantile(0.25)
                 train_q3 = X_train[feature].quantile(0.75)
                 train_iqr = train_q3 - train_q1
@@ -353,7 +361,7 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
 
                 display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
 
-                st.success(f"Predicted Power Output: {prediction_value[0]:.2f} MW")
+                st.success(f"Predicted {target_column}: {prediction_value[0]:.2f}")
 
             except Exception as e:
                 st.error(f"Error making prediction: {str(e)}")
@@ -370,15 +378,17 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
 
                 if st.button("Make Predictions", key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_batch_predict"):
                     try:
-                        input_df = pred_df[feature_names].copy()
+                        # Only use features present in both feature_names and pred_df
+                        valid_features = [f for f in feature_names if f in pred_df.columns]
+                        input_df = pred_df[valid_features].copy()
 
                         warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
 
                         scaled_input_features = scaler.transform(input_df)
-                        scaled_input_df = pd.DataFrame(scaled_input_features, columns=feature_names)
+                        scaled_input_df = pd.DataFrame(scaled_input_features, columns=valid_features)
                         predictions = predict(model, scaled_input_df)
                         results_df = pred_df.copy()
-                        results_df['Predicted Power Output (MW)'] = predictions
+                        results_df[f'Predicted {target_column}'] = predictions
 
                         # Add warning flags to results
                         results_df['Has Red Warning'] = warning_flags_df['has_red_warning']
@@ -790,7 +800,7 @@ def main():
                             from train import train_model
                             # Get custom hyperparameters from session state if available
                             model_params = st.session_state.get('model_params')
-                            metrics = train_model(training_file, models_dir, model_params=model_params)
+                            metrics = train_model(training_file, models_dir, target_column=target_col, model_params=model_params)
                             model, scaler, feature_names = load_latest_model_files(models_dir)
                             st.success("New model trained and loaded successfully!")
                             cleanup_old_models(models_dir)
@@ -811,6 +821,11 @@ def main():
         model, scaler, feature_names, training_data, status = load_selected_model_components(model_option, models_dir)
 
         st.sidebar.write(status)
+
+        # Always get feature_names and target_column from training_data
+        if training_data is not None:
+            feature_names = training_data.get('feature_names', feature_names)
+            target_col = training_data.get('target_column', None)
 
         if model and scaler and feature_names and training_data:
             # Display training data visualizations
@@ -839,25 +854,34 @@ def main():
             st.warning("Please train a new model first to use Time Series.")
         if show_time_series:
             st.title("Time Series Forecasting")
-            
-            # Load the default model's training data
+
+            # Use the loaded training_data and model for time series
             try:
-                default_data = pd.read_excel("data/default_data.xlsx")
-                # Always generate datetime index for default data
-                start_datetime = pd.Timestamp("2023-01-01 20:00")
-                freq = '1H'
-                default_data.index = pd.date_range(start=start_datetime, periods=len(default_data), freq=freq)
+                if model_option == "Use Default Model":
+                    # For default model, load default data and model
+                    default_data = pd.read_excel("data/default_data.xlsx")
+                    start_datetime = pd.Timestamp("2023-01-01 20:00")
+                    freq = '1H'
+                    default_data.index = pd.date_range(start=start_datetime, periods=len(default_data), freq=freq)
+                    model, scaler, feature_names = load_default_model("models")
+                    # Get target column from default model's training data
+                    target_col = joblib.load(os.path.join("models", "default_training_data.pkl")).get('target_column', default_data.columns[-1])
+                    ts_data = default_data
+                else:
+                    # For new model, use the latest training data and model
+                    ts_data = training_data['X_train'].copy()
+                    ts_data[training_data['target_column']] = training_data['y_train']
+                    model = st.session_state.get('new_model_model')
+                    scaler = st.session_state.get('new_model_scaler')
+                    feature_names = st.session_state.get('new_model_feature_names')
+                    target_col = training_data['target_column']
 
-                # Always use the last column as the target for the default dataset
-                target_col = default_data.columns[-1]
-
-                # Display data preview
-                st.write("Default Model Training Data Preview:")
-                st.dataframe(default_data.head())
+                st.write("Training Data Preview:")
+                st.dataframe(ts_data.head())
 
                 # Feature selection (excluding target)
                 st.subheader("Feature Selection")
-                available_features = [col for col in default_data.columns if col != target_col]
+                available_features = [col for col in ts_data.columns if col != target_col]
                 selected_features = st.multiselect(
                     "Select Features",
                     available_features,
@@ -890,9 +914,8 @@ def main():
                                     )
                                     feature_trends[feature] = {
                                         'type': 'linear',
-                                        'params': {'slope': slope / 100}  # Convert percentage to decimal
+                                        'params': {'slope': slope / 100}
                                     }
-
                                 elif trend_type == "Exponential":
                                     growth_rate = st.number_input(
                                         f"Annual growth rate for {feature} (%)",
@@ -902,9 +925,8 @@ def main():
                                     )
                                     feature_trends[feature] = {
                                         'type': 'exponential',
-                                        'params': {'growth_rate': growth_rate / 100}  # Convert percentage to decimal
+                                        'params': {'growth_rate': growth_rate / 100}
                                     }
-
                                 elif trend_type == "Polynomial":
                                     degree = st.slider(
                                         f"Polynomial degree for {feature}",
@@ -927,10 +949,9 @@ def main():
 
                     if st.button("Generate Scenario"):
                         # Create scenario dataframe with extrapolated features (exclude target)
-                        scenario_features = create_scenario_dataframe(default_data[selected_features], years, feature_trends)
+                        scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
                         scenario_data = scenario_features.copy()
 
-                        model, scaler, feature_names = load_default_model("models")
                         if model and scaler:
                             # Prepare data for prediction
                             X_all = scenario_data[selected_features]
@@ -938,14 +959,14 @@ def main():
                             predictions = model.predict(X_scaled)
 
                             # For historical part, use original target; for future, use predictions
-                            n_hist = len(default_data)
+                            n_hist = len(ts_data)
                             scenario_data[target_col] = np.concatenate([
-                                default_data[target_col].values,
+                                ts_data[target_col].values,
                                 predictions[n_hist:]
                             ])
 
                             # Display results
-                            st.subheader("Feature Trends and Power Predictions")
+                            st.subheader(f"Feature Trends and {target_col} Predictions")
                             st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
 
                             # Add download button for scenario data
@@ -957,11 +978,11 @@ def main():
                                 mime="text/csv"
                             )
                         else:
-                            st.error("Failed to load the default model. Please ensure the model files exist.")
+                            st.error("Failed to load the model. Please ensure the model files exist.")
 
             except Exception as e:
-                st.error(f"Error loading default model data: {str(e)}")
-                st.error("Please ensure the default model training data exists at 'data/default_data.xlsx'")
+                st.error(f"Error loading model data: {str(e)}")
+                st.error("Please ensure the model training data exists and is compatible.")
 
 if __name__ == "__main__":
     main()

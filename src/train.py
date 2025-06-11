@@ -190,8 +190,8 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     plt.figure(figsize=(8, 6))
     plt.scatter(y_test, xgb_preds, alpha=0.5, color='orange')
     plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--', lw=2)
-    plt.xlabel("Actual Brüt Güç")
-    plt.ylabel("Predicted Brüt Güç")
+    plt.xlabel("Actual Target")
+    plt.ylabel("Predicted Target")
     plt.title("XGBoost Actual vs Predicted")
     plot_path = os.path.join(models_dir, f"actual_vs_predicted_{timestamp}.png")
     plt.savefig(plot_path)
@@ -209,7 +209,8 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         'X_test': X_test,
         'y_train': y_train,
         'y_test': y_test,
-        'feature_names': feature_names
+        'feature_names': feature_names,
+        'target_column': target_column
     }
     joblib.dump(training_data, training_data_path)
     
@@ -242,6 +243,7 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         },
         'model_params': xgb_model.get_params(),
         'feature_names': list(feature_names),
+        'target_column': target_column,
         'plot_path': plot_path,
         'actual': y_test.tolist(),
         'predicted': xgb_preds.tolist(),
