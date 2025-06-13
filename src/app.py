@@ -1032,6 +1032,16 @@ def main():
                         st.subheader(f"Feature Trends and {target_col} Predictions")
                         st.plotly_chart(plot_scenario(scenario_data.round(2), years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
 
+                        # Download button for data without well simulation
+                        csv_no_sim = scenario_data.round(4).to_csv()
+                        st.download_button(
+                            label="Download Scenario Data (no simulation)",
+                            data=csv_no_sim,
+                            file_name="scenario_predictions_no_simulation.csv",
+                            mime="text/csv",
+                            key="download_no_sim"
+                        )
+
                         # Calculate and display yearly averages of projected predictions (future)
                         split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
                         future_data = scenario_data[scenario_data.index > split_date]
@@ -1331,41 +1341,26 @@ def main():
 
                             st.subheader(f"Number of make-up wells to drill over {years} years: **{len(pulses)}**")
 
+                            # Download button for data with well simulation
+                            # Reconstruct the full features dataframe with adjustments
+                            hist_features = scenario_data[scenario_data.index <= split_date][selected_features]
+                            full_adjusted_features = pd.concat([hist_features, adjusted_future_features])
+
+                            # Create the download dataframe
+                            download_df_sim = full_adjusted_features.copy()
+                            download_df_sim[f'{target_col} (no makeup well)'] = scenario_data[target_col]
+                            download_df_sim[f'{target_col} (with makeup wells)'] = adjusted_series
+                            
+                            csv_with_sim = download_df_sim.round(4).to_csv()
+                            st.download_button(
+                                label="Download Scenario Data (with simulation)",
+                                data=csv_with_sim,
+                                file_name="scenario_predictions_with_simulation.csv",
+                                mime="text/csv",
+                                key="download_with_sim"
+                            )
+
                         # ---------------------------------------------------------------
-
-                        # Add download button for scenario data
-                        # Create a new dataframe for download to ensure proper alignment
-                        scenario_data = st.session_state.scenario_data
-                        target_col = st.session_state.target_col
-
-                        # Create a dictionary of the series we want in the CSV
-                        download_data = {}
-                        # Add all feature columns from the original scenario_data
-                        for col in scenario_data.columns:
-                            if col != target_col:
-                                download_data[col] = scenario_data[col]
-
-                        # Add the 'no makeup well' power column
-                        download_data[f'{target_col} (no makeup well)'] = scenario_data[target_col]
-
-                        # Add the 'with makeup wells' power column
-                        if 'adjusted_series' in st.session_state:
-                            download_data[f'{target_col} (with makeup wells)'] = st.session_state.adjusted_series
-                        else:
-                            # If no simulation was run, just copy the 'no makeup' data
-                            download_data[f'{target_col} (with makeup wells)'] = scenario_data[target_col]
-
-                        # Create the DataFrame from the dictionary. This should align everything by index.
-                        download_df = pd.DataFrame(download_data)
-
-                        # Round to 4 decimal places and convert to CSV
-                        csv = download_df.round(4).to_csv()
-                        st.download_button(
-                            label="Download scenario data as CSV",
-                            data=csv,
-                            file_name="scenario_predictions.csv",
-                            mime="text/csv"
-                        )
 
             except Exception as e:
                 st.error(f"Error loading model data: {str(e)}")
