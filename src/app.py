@@ -1094,7 +1094,7 @@ def main():
                         muw_flowrate = st.number_input(
                             "Make-up Well Flowrate (T/h)",
                             min_value=0.0,
-                            value=100.0,
+                            value=400.0,
                             step=10.0,
                             key="muw_flowrate"
                         )
@@ -1155,13 +1155,13 @@ def main():
                                             new_predictions = model.predict(X_scaled)
                                             adjusted_power = pd.Series(new_predictions, index=adjusted_features.index)
                                 
-                                return adjusted_power, well_drilling_dates
+                                return adjusted_power, well_drilling_dates, adjusted_features
 
                             # Prepare data for the simulation function
                             future_features = scenario_data[scenario_data.index > split_date][selected_features]
                             future_power = future_data[target_col]
 
-                            adjusted_future, pulses = apply_well_drilling_strategy(
+                            adjusted_future_power, pulses, adjusted_future_features = apply_well_drilling_strategy(
                                 future_features,
                                 future_power,
                                 model,
@@ -1173,7 +1173,7 @@ def main():
                             )
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
-                            adjusted_series.loc[scenario_data.index > split_date] = adjusted_future
+                            adjusted_series.loc[scenario_data.index > split_date] = adjusted_future_power
 
                             # Plot baseline vs adjusted predictions
                             fig_well = go.Figure()
@@ -1281,6 +1281,27 @@ def main():
                                 hovermode='x unified'
                             )
                             st.plotly_chart(fig_quarterly_well, use_container_width=True)
+
+                            # Plot adjusted input features
+                            st.subheader("Adjusted Input Features from New Wells")
+
+                            # Plot for Brine Flowrate
+                            fig_brine = go.Figure()
+                            fig_brine.add_trace(go.Scatter(x=future_features.index, y=future_features["Brine Flowrate (T/h)"], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
+                            fig_brine.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["Brine Flowrate (T/h)"], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
+                            for pulse_time in pulses:
+                                fig_brine.add_vline(x=pulse_time, line_color="red")
+                            fig_brine.update_layout(title='Brine Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
+                            st.plotly_chart(fig_brine, use_container_width=True)
+
+                            # Plot for NCG+Steam Flowrate
+                            fig_ncg = go.Figure()
+                            fig_ncg.add_trace(go.Scatter(x=future_features.index, y=future_features["NCG+Steam Flowrate (T/h)"], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
+                            fig_ncg.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["NCG+Steam Flowrate (T/h)"], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
+                            for pulse_time in pulses:
+                                fig_ncg.add_vline(x=pulse_time, line_color="red")
+                            fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
+                            st.plotly_chart(fig_ncg, use_container_width=True)
 
                         # ---------------------------------------------------------------
 
