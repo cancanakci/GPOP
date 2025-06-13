@@ -916,16 +916,16 @@ def main():
                 if selected_features:
                     # Configure trends
                     st.subheader("Feature Trends")
-                    years = st.slider("Number of years to project", 1, 50, 20)
+                    years = st.slider("Number of years to project", 1, 50, 25)
 
                     # --- Default trend settings ---
                     default_trends = {
-                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -2.0},
+                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
                         "Fluid Temperature (°C)": {"type": "Linear", "value": -1.0},
-                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -2.0},
+                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
                         "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0},
                         "Heat Exchanger Pressure Differential (Bar)": {"type": "Constant", "value": 0.0},
-                        "Reinjection Temperature (°C)": {"type": "Linear", "value": 0.5}
+                        "Reinjection Temperature (°C)": {"type": "Linear", "value": 0.4}
                     }
 
                     feature_trends = {}
@@ -949,7 +949,7 @@ def main():
                             with col2:
                                 if trend_type == "Linear":
                                     slope = st.number_input(
-                                        f"Annual change for {feature} (%)",
+                                        f"Annual change for {feature}",
                                         value=defaults["value"] if defaults["type"] == "Linear" else 0.0,
                                         format="%.2f",
                                         key=f"slope_{feature}"
@@ -1072,7 +1072,7 @@ def main():
                         threshold = st.number_input(
                             "Yearly average power threshold for drilling a new well (MW)",
                             min_value=0,
-                            value=30,
+                            value=35,
                             step=1,
                             key="well_threshold"
                         )
@@ -1319,7 +1319,8 @@ def main():
                             fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
                             st.plotly_chart(fig_ncg, use_container_width=True)
 
-                            st.write(f"Number of new wells to drill over projection period: **{len(pulses)}**")
+                            st.subheader("Drilling Summary")
+                            st.markdown(f"### Number of make-up wells to drill over {years} years: **{len(pulses)}**")
 
                         # ---------------------------------------------------------------
 
