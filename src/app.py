@@ -1027,7 +1027,7 @@ def main():
                         
                         # Display results
                         st.subheader(f"Feature Trends and {target_col} Predictions")
-                        st.plotly_chart(plot_scenario(scenario_data.round(2), years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+                        st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
 
                         # Download button for data without well simulation
                         if 'csv_no_sim' in st.session_state:
@@ -1042,34 +1042,6 @@ def main():
                         # Calculate and display yearly averages of projected predictions (future)
                         split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
                         future_data = scenario_data[scenario_data.index > split_date]
-                        yearly_avg = future_data[target_col].resample('Y').mean()
-
-                        st.subheader("Yearly Averages of Projected Predictions")
-                        fig_yearly = go.Figure()
-                        fig_yearly.add_trace(
-                            go.Scatter(
-                                x=yearly_avg.index,
-                                y=yearly_avg.values,
-                                name='Yearly Average',
-                                mode='lines',
-                                line=dict(color='royalblue')
-                            )
-                        )
-                        overall_mean = yearly_avg.mean()
-                        fig_yearly.add_hline(
-                            y=overall_mean,
-                            line_dash="dash",
-                            line_color="red",
-                            annotation_text=f"Overall Mean: {overall_mean:.2f}",
-                            annotation_position="top right"
-                        )
-                        fig_yearly.update_layout(
-                            title='Yearly Averages of Projected Predictions',
-                            xaxis_title='Year',
-                            yaxis_title=f'Average {target_col}',
-                            showlegend=False,
-                            hovermode='x unified'
-                        )
 
                         # ------------------ Well Drilling Simulation ------------------
                         st.subheader("Well Drilling Simulation")
@@ -1240,7 +1212,7 @@ def main():
                             fig_well.add_trace(
                                 go.Scatter(
                                     x=scenario_data.index,
-                                    y=scenario_data[target_col].round(2),
+                                    y=scenario_data[target_col],
                                     name='Original Predictions',
                                     mode='lines'
                                 )
@@ -1248,7 +1220,7 @@ def main():
                             fig_well.add_trace(
                                 go.Scatter(
                                     x=adjusted_series.index,
-                                    y=adjusted_series.round(2).values,
+                                    y=adjusted_series.values,
                                     name='Adjusted with New Wells',
                                     mode='lines'
                                 )
@@ -1275,7 +1247,7 @@ def main():
                             fig_yearly_well.add_trace(
                                 go.Scatter(
                                     x=yearly_adjusted_avg.index,
-                                    y=yearly_adjusted_avg.round(2).values,
+                                    y=yearly_adjusted_avg.round(4).values,
                                     name='Yearly Average',
                                     mode='lines',
                                     line=dict(color='darkblue')
@@ -1311,7 +1283,7 @@ def main():
                             fig_quarterly_well.add_trace(
                                 go.Scatter(
                                     x=quarterly_adjusted_avg.index,
-                                    y=quarterly_adjusted_avg.round(2).values,
+                                    y=quarterly_adjusted_avg.round(4).values,
                                     name='Quarterly Average',
                                     mode='lines',
                                     line=dict(color='darkcyan')
@@ -1343,8 +1315,8 @@ def main():
 
                             # Plot for Brine Flowrate
                             fig_brine = go.Figure()
-                            fig_brine.add_trace(go.Scatter(x=future_features.index, y=future_features["Brine Flowrate (T/h)"].round(2), name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
-                            fig_brine.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["Brine Flowrate (T/h)"].round(4), name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
+                            fig_brine.add_trace(go.Scatter(x=future_features.index, y=future_features["Brine Flowrate (T/h)"], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
+                            fig_brine.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["Brine Flowrate (T/h)"], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
                             for pulse_time in pulses:
                                 fig_brine.add_vline(x=pulse_time, line_color="red")
                             fig_brine.update_layout(title='Brine Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
@@ -1352,8 +1324,8 @@ def main():
 
                             # Plot for NCG+Steam Flowrate
                             fig_ncg = go.Figure()
-                            fig_ncg.add_trace(go.Scatter(x=future_features.index, y=future_features["NCG+Steam Flowrate (T/h)"].round(2), name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
-                            fig_ncg.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["NCG+Steam Flowrate (T/h)"].round(4), name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
+                            fig_ncg.add_trace(go.Scatter(x=future_features.index, y=future_features["NCG+Steam Flowrate (T/h)"], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
+                            fig_ncg.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["NCG+Steam Flowrate (T/h)"], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
                             for pulse_time in pulses:
                                 fig_ncg.add_vline(x=pulse_time, line_color="red")
                             fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
