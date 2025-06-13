@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 
-def train_model(data_path, models_dir, target_column=None, n_splits=5, is_default=False, model_params=None):
+def train_model(data_path, models_dir, target_column=None, n_splits=5, is_default=False, model_params=None, test_size=0.2):
     """Loads data, preprocesses it, trains XGBoost model with cross-validation, and saves model with metrics."""
     
     # Create timestamp for model versioning
@@ -65,8 +65,8 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     joblib.dump(feature_names, feature_names_path)
     print(f"Feature names saved to {feature_names_path}")
 
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # DEFAULT SPLIT IS 80/20
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
 
     # --- Scaling (Fit only on training data) ---
     scaler = StandardScaler()
@@ -266,17 +266,5 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     return metrics
 
 if __name__ == "__main__":
-    data_file = "data/Can veriler.xlsx"
-    models_dir = "models"
-    
-    # Ensure models directory exists
-    os.makedirs(models_dir, exist_ok=True)
-
-    try:
-        metrics = train_model(data_file, models_dir)
-        print("\nTraining completed successfully.")
-        print("\nModel Performance Summary:")
-        print(f"XGBoost R²: {metrics['metrics']['r2']:.4f}")
-        print(f"Cross-validation R²: {metrics['metrics']['cv_metrics']['r2_mean']:.4f} (+/- {metrics['metrics']['cv_metrics']['r2_std'] * 2:.4f})")
-    except Exception as e:
-        print(f"Training failed: {e}")
+    pass
+    # DEPRECATED

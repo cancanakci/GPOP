@@ -139,7 +139,7 @@ def load_data(file_path):
     return df
 
 def preprocess_data(df):
-    """Perform preprocessing on the dataframe, including interpolation."""
+    """Perform preprocessing on the dataframe. Tries interpolation first, then mean imputation."""
     processed_df = df.copy()
 
     # Debug: Print DataFrame dtypes

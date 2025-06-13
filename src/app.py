@@ -790,6 +790,9 @@ def main():
                         'colsample_bytree': colsample_bytree
                     }
 
+                    # Add a slider for test_size (train/test split ratio)
+                    test_size = st.slider("Test Set Size (Fraction)", min_value=0.1, max_value=0.5, value=0.2, step=0.01, help="Fraction of data to use as test set (e.g., 0.2 = 20%)")
+
                     if 'new_model_metrics' not in st.session_state:
                         st.session_state['new_model_metrics'] = None
                     if 'new_model_trained' not in st.session_state:
@@ -800,7 +803,7 @@ def main():
                             from train import train_model
                             # Get custom hyperparameters from session state if available
                             model_params = st.session_state.get('model_params')
-                            metrics = train_model(training_file, models_dir, target_column=target_col, model_params=model_params)
+                            metrics = train_model(training_file, models_dir, target_column=target_col, model_params=model_params, test_size=test_size)
                             model, scaler, feature_names = load_latest_model_files(models_dir)
                             st.success("New model trained and loaded successfully!")
                             cleanup_old_models(models_dir)
@@ -879,14 +882,8 @@ def main():
                 st.write("Training Data Preview:")
                 st.dataframe(ts_data.head())
 
-                # Feature selection (excluding target)
-                st.subheader("Feature Selection")
-                available_features = [col for col in ts_data.columns if col != target_col]
-                selected_features = st.multiselect(
-                    "Select Features",
-                    available_features,
-                    default=available_features
-                )
+                # Use all features except the target column
+                selected_features = [col for col in ts_data.columns if col != target_col]
 
                 if selected_features:
                     # Configure trends

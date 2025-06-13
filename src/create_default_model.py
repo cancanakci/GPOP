@@ -5,20 +5,20 @@ import pandas as pd
 
 def create_default_model(target_column=None):
     """Create and save the default model using the provided training data."""
-    # Ensure models directory exists
     os.makedirs("models", exist_ok=True)
     
-    # Path to the default training data
+    # DEFAULT DATA IS default_data.xlsx
     default_data_path = "data/default_data.xlsx"
     
     if not os.path.exists(default_data_path):
         raise FileNotFoundError(f"Default training data not found at {default_data_path}")
     
     try:
-        # Dynamically determine target column if not provided
+        # Determine target column from parameter
         df = pd.read_excel(default_data_path)
         if target_column is None:
             target_column = df.columns[-1]
+            
         # Train the model
         metrics = train_model(default_data_path, "models", target_column=target_column, is_default=True)
         print("\nDefault model created successfully!")
