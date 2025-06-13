@@ -498,7 +498,7 @@ def display_model_metrics(metrics):
     else:
         st.sidebar.warning("No model metrics found.")
 
-def create_scenario_dataframe(historical_df, years, feature_trends, progress_placeholder):
+def create_scenario_dataframe(historical_df, years, feature_trends):
     """
     Creates a scenario dataframe by extrapolating historical data based on seasonality and trends.
     It uses time-series decomposition to separate trend, seasonality, and residuals.
@@ -992,17 +992,11 @@ def main():
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("Generate Scenario"):
-                            # Add a placeholder for the progress bar
-                            progress_placeholder = st.empty()
-                            
                             # Create scenario dataframe with extrapolated features (exclude target)
-                            scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends, progress_placeholder)
+                            scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
                             scenario_data = scenario_features.copy()
 
                             if model and scaler:
-                                # Update progress bar for prediction step
-                                progress_placeholder.progress(0.8, text="Applying model to predict power output...")
-
                                 # Prepare data for prediction
                                 X_all = scenario_data[selected_features]
                                 X_scaled = scaler.transform(X_all)
@@ -1020,9 +1014,6 @@ def main():
                                 st.session_state.years = years
                                 st.session_state.target_col = target_col
                                 st.session_state.feature_trends = feature_trends
-                                
-                                # Rerun to display the results and ensure progress bar covers plotting
-                                st.rerun()
 
                             else:
                                 st.error("Failed to load the model. Please ensure the model files exist.")
@@ -1031,6 +1022,8 @@ def main():
                         if st.button("Clear Scenario"):
                             if 'scenario_data' in st.session_state:
                                 del st.session_state.scenario_data
+                            if 'adjusted_series' in st.session_state:
+                                del st.session_state.adjusted_series
                             st.rerun()
 
                     if 'scenario_data' in st.session_state:
@@ -1042,7 +1035,39 @@ def main():
                         
                         # Display results
                         st.subheader(f"Feature Trends and {target_col} Predictions")
-                        st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+                        st.plotly_chart(plot_scenario(scenario_data.round(2), years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+
+                        # Calculate and display yearly averages of projected predictions (future)
+                        split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
+                        future_data = scenario_data[scenario_data.index > split_date]
+                        yearly_avg = future_data[target_col].resample('Y').mean()
+
+                        st.subheader("Yearly Averages of Projected Predictions")
+                        fig_yearly = go.Figure()
+                        fig_yearly.add_trace(
+                            go.Scatter(
+                                x=yearly_avg.index,
+                                y=yearly_avg.values,
+                                name='Yearly Average',
+                                mode='lines',
+                                line=dict(color='royalblue')
+                            )
+                        )
+                        overall_mean = yearly_avg.mean()
+                        fig_yearly.add_hline(
+                            y=overall_mean,
+                            line_dash="dash",
+                            line_color="red",
+                            annotation_text=f"Overall Mean: {overall_mean:.2f}",
+                            annotation_position="top right"
+                        )
+                        fig_yearly.update_layout(
+                            title='Yearly Averages of Projected Predictions',
+                            xaxis_title='Year',
+                            yaxis_title=f'Average {target_col}',
+                            showlegend=False,
+                            hovermode='x unified'
+                        )
 
                         # ------------------ Well Drilling Simulation ------------------
                         st.subheader("Well Drilling Simulation")
@@ -1183,13 +1208,14 @@ def main():
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
                             adjusted_series.loc[scenario_data.index > split_date] = adjusted_future_power
+                            st.session_state.adjusted_series = adjusted_series
 
                             # Plot baseline vs adjusted predictions
                             fig_well = go.Figure()
                             fig_well.add_trace(
                                 go.Scatter(
                                     x=scenario_data.index,
-                                    y=scenario_data[target_col],
+                                    y=scenario_data[target_col].round(2),
                                     name='Original Predictions',
                                     mode='lines'
                                 )
@@ -1197,7 +1223,7 @@ def main():
                             fig_well.add_trace(
                                 go.Scatter(
                                     x=adjusted_series.index,
-                                    y=adjusted_series.values,
+                                    y=adjusted_series.round(2).values,
                                     name='Adjusted with New Wells',
                                     mode='lines'
                                 )
@@ -1224,7 +1250,7 @@ def main():
                             fig_yearly_well.add_trace(
                                 go.Scatter(
                                     x=yearly_adjusted_avg.index,
-                                    y=yearly_adjusted_avg.values,
+                                    y=yearly_adjusted_avg.round(2).values,
                                     name='Yearly Average',
                                     mode='lines',
                                     line=dict(color='darkblue')
@@ -1260,7 +1286,7 @@ def main():
                             fig_quarterly_well.add_trace(
                                 go.Scatter(
                                     x=quarterly_adjusted_avg.index,
-                                    y=quarterly_adjusted_avg.values,
+                                    y=quarterly_adjusted_avg.round(2).values,
                                     name='Quarterly Average',
                                     mode='lines',
                                     line=dict(color='darkcyan')
@@ -1292,8 +1318,8 @@ def main():
 
                             # Plot for Brine Flowrate
                             fig_brine = go.Figure()
-                            fig_brine.add_trace(go.Scatter(x=future_features.index, y=future_features["Brine Flowrate (T/h)"], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
-                            fig_brine.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["Brine Flowrate (T/h)"], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
+                            fig_brine.add_trace(go.Scatter(x=future_features.index, y=future_features["Brine Flowrate (T/h)"].round(2), name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
+                            fig_brine.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["Brine Flowrate (T/h)"].round(4), name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
                             for pulse_time in pulses:
                                 fig_brine.add_vline(x=pulse_time, line_color="red")
                             fig_brine.update_layout(title='Brine Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
@@ -1301,20 +1327,44 @@ def main():
 
                             # Plot for NCG+Steam Flowrate
                             fig_ncg = go.Figure()
-                            fig_ncg.add_trace(go.Scatter(x=future_features.index, y=future_features["NCG+Steam Flowrate (T/h)"], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
-                            fig_ncg.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["NCG+Steam Flowrate (T/h)"], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
+                            fig_ncg.add_trace(go.Scatter(x=future_features.index, y=future_features["NCG+Steam Flowrate (T/h)"].round(2), name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
+                            fig_ncg.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["NCG+Steam Flowrate (T/h)"].round(4), name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
                             for pulse_time in pulses:
                                 fig_ncg.add_vline(x=pulse_time, line_color="red")
                             fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
                             st.plotly_chart(fig_ncg, use_container_width=True)
 
-                            st.subheader("Drilling Summary")
-                            st.markdown(f"### Number of make-up wells to drill over {years} years: **{len(pulses)}**")
+                            st.subheader(f"Number of make-up wells to drill over {years} years: **{len(pulses)}**")
 
                         # ---------------------------------------------------------------
 
                         # Add download button for scenario data
-                        csv = scenario_data.to_csv()
+                        # Create a new dataframe for download to ensure proper alignment
+                        scenario_data = st.session_state.scenario_data
+                        target_col = st.session_state.target_col
+
+                        # Create a dictionary of the series we want in the CSV
+                        download_data = {}
+                        # Add all feature columns from the original scenario_data
+                        for col in scenario_data.columns:
+                            if col != target_col:
+                                download_data[col] = scenario_data[col]
+
+                        # Add the 'no makeup well' power column
+                        download_data[f'{target_col} (no makeup well)'] = scenario_data[target_col]
+
+                        # Add the 'with makeup wells' power column
+                        if 'adjusted_series' in st.session_state:
+                            download_data[f'{target_col} (with makeup wells)'] = st.session_state.adjusted_series
+                        else:
+                            # If no simulation was run, just copy the 'no makeup' data
+                            download_data[f'{target_col} (with makeup wells)'] = scenario_data[target_col]
+
+                        # Create the DataFrame from the dictionary. This should align everything by index.
+                        download_df = pd.DataFrame(download_data)
+
+                        # Round to 4 decimal places and convert to CSV
+                        csv = download_df.round(4).to_csv()
                         st.download_button(
                             label="Download scenario data as CSV",
                             data=csv,
