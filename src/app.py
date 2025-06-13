@@ -1091,53 +1091,86 @@ def main():
                             step=1,
                             key="well_threshold"
                         )
-                        jump_magnitude = st.number_input(
-                            "Power increase per new well (MW)",
-                            min_value=0.1,
-                            value=5.0,
-                            step=0.1,
-                            key="well_jump"
+                        muw_flowrate = st.number_input(
+                            "Make-up Well Flowrate (T/h)",
+                            min_value=0.0,
+                            value=100.0,
+                            step=10.0,
+                            key="muw_flowrate"
+                        )
+                        steam_percentage = st.number_input(
+                            "Make-up Well Steam Percentage (%)",
+                            min_value=0.0,
+                            max_value=100.0,
+                            value=20.0,
+                            step=1.0,
+                            key="steam_percentage"
                         )
 
                         if st.button("Simulate New Wells"):
-                            def apply_well_drilling_strategy(future_power_series, threshold, jump_magnitude):
+                            def apply_well_drilling_strategy(
+                                initial_future_features,
+                                initial_future_power,
+                                model,
+                                scaler,
+                                feature_names,
+                                threshold,
+                                muw_flowrate,
+                                steam_percentage
+                            ):
                                 """
-                                Iteratively simulates well drilling on a yearly basis. When a yearly average drops
-                                below the threshold, the entire future curve is lifted. This is repeated
-                                for each year in the projection period.
+                                Iteratively simulates well drilling. When yearly average power drops below
+                                the threshold, a new well's contribution is added to the input features,
+                                and the future power output is re-predicted.
                                 """
-                                adjusted_series = future_power_series.copy()
+                                adjusted_features = initial_future_features.copy()
+                                adjusted_power = initial_future_power.copy()
                                 well_drilling_dates = []
 
-                                # Generate all year-start timestamps for the projection period
+                                delta_ncg = muw_flowrate * (steam_percentage / 100.0)
+                                delta_brine = muw_flowrate * (1 - (steam_percentage / 100.0))
+
                                 year_starts = pd.date_range(
-                                    start=future_power_series.index.min().to_period('Y').to_timestamp(),
-                                    end=future_power_series.index.max().to_period('Y').to_timestamp(),
+                                    start=adjusted_power.index.min().to_period('Y').to_timestamp(),
+                                    end=adjusted_power.index.max().to_period('Y').to_timestamp(),
                                     freq='YS'
                                 )
 
-                                # Iterate through each year sequentially
                                 for start_of_year in year_starts:
                                     end_of_year = start_of_year + pd.DateOffset(years=1)
-                                    
-                                    yearly_mask = (adjusted_series.index >= start_of_year) & (adjusted_series.index < end_of_year)
+                                    yearly_mask = (adjusted_power.index >= start_of_year) & (adjusted_power.index < end_of_year)
 
                                     if yearly_mask.any():
-                                        # Calculate average on the *current*, potentially adjusted series
-                                        yearly_average = adjusted_series[yearly_mask].mean()
+                                        yearly_average = adjusted_power[yearly_mask].mean()
 
-                                        # If the average is below threshold, drill a well
                                         if yearly_average < threshold:
-                                            # The well is "drilled" at the start of the year
                                             drilling_date = start_of_year
                                             well_drilling_dates.append(drilling_date)
 
-                                            # Lift the ENTIRE future curve from this point forward
-                                            adjusted_series.loc[adjusted_series.index >= drilling_date] += jump_magnitude
-                                
-                                return adjusted_series, well_drilling_dates
+                                            future_mask = adjusted_features.index >= drilling_date
+                                            adjusted_features.loc[future_mask, "Brine Flowrate (T/h)"] += delta_brine
+                                            adjusted_features.loc[future_mask, "NCG+Steam Flowrate (T/h)"] += delta_ncg
 
-                            adjusted_future, pulses = apply_well_drilling_strategy(future_data[target_col], threshold, jump_magnitude)
+                                            X_scaled = scaler.transform(adjusted_features[feature_names])
+                                            new_predictions = model.predict(X_scaled)
+                                            adjusted_power = pd.Series(new_predictions, index=adjusted_features.index)
+                                
+                                return adjusted_power, well_drilling_dates
+
+                            # Prepare data for the simulation function
+                            future_features = scenario_data[scenario_data.index > split_date][selected_features]
+                            future_power = future_data[target_col]
+
+                            adjusted_future, pulses = apply_well_drilling_strategy(
+                                future_features,
+                                future_power,
+                                model,
+                                scaler,
+                                selected_features,
+                                threshold,
+                                muw_flowrate,
+                                steam_percentage
+                            )
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
                             adjusted_series.loc[scenario_data.index > split_date] = adjusted_future
