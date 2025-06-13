@@ -789,18 +789,18 @@ def main():
                     with col1:
                         n_estimators = st.slider("Number of Trees (n_estimators)", 
                                               min_value=50, max_value=500, 
-                                              value=200, step=50)
+                                              value=300, step=50)
                         learning_rate = st.slider("Learning Rate", 
                                                min_value=0.01, max_value=0.3, 
                                                value=0.05, step=0.01)
                         max_depth = st.slider("Maximum Tree Depth", 
                                            min_value=3, max_value=10, 
-                                           value=6, step=1)
+                                           value=4, step=1)
                     
                     with col2:
                         min_child_weight = st.slider("Minimum Child Weight", 
                                                   min_value=1, max_value=10, 
-                                                  value=1, step=1)
+                                                  value=4, step=1)
                         subsample = st.slider("Subsample Ratio", 
                                            min_value=0.5, max_value=1.0, 
                                            value=0.8, step=0.1)
