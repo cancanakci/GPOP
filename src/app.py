@@ -595,6 +595,12 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     The target plot is emphasized with a taller y-axis and a clear label.
     Modifiers are shown above the plots.
     """
+    # Downsample data for plotting to improve performance
+    if len(scenario_data) > 2000:  # Only sample if data is large
+        plot_data = scenario_data.resample('D').mean()
+    else:
+        plot_data = scenario_data
+
     # Show modifiers summary
     if feature_trends:
         st.markdown("**Applied Modifiers:**")
@@ -623,7 +629,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     ]
 
     # Separate target from features
-    features = [col for col in scenario_data.columns if col != target_col]
+    features = [col for col in plot_data.columns if col != target_col]
     n_features = len(features)
     total_rows = n_features + 1  # +1 for target
 
@@ -638,12 +644,15 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     )
 
     # Get the split point between historical and future data
-    split_date = scenario_data.index[-int(years * 365.25 * 24 / pd.Timedelta(scenario_data.index.freq).total_seconds() * 3600)]
+    if len(plot_data) > 0:
+        split_date = plot_data.index[-int(years * 365.25 * (plot_data.index.freq / pd.Timedelta(days=1)))]
+    else:
+        split_date = pd.Timestamp.now()
 
     # Plot target (emphasized)
     actual_color, future_color = color_pairs[0]
-    historical_target = scenario_data[target_col][:split_date]
-    future_target = scenario_data[target_col][split_date:]
+    historical_target = plot_data[target_col][:split_date]
+    future_target = plot_data[target_col][split_date:]
     fig.add_trace(
         go.Scatter(
             x=historical_target.index,
@@ -668,8 +677,8 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     # Plot each feature in its own subplot
     for i, feature in enumerate(features, 2):
         actual_color, future_color = color_pairs[i % len(color_pairs)]
-        historical_data = scenario_data[feature][:split_date]
-        future_data = scenario_data[feature][split_date:]
+        historical_data = plot_data[feature][:split_date]
+        future_data = plot_data[feature][split_date:]
         fig.add_trace(
             go.Scatter(
                 x=historical_data.index,
@@ -1027,6 +1036,10 @@ def main():
                         
                         # Display results
                         st.subheader(f"Feature Trends and {target_col} Predictions")
+
+                        if len(scenario_data) > 2000:
+                            st.info("ℹ️ To improve performance, charts are downsampled to show daily averages. The downloaded data contains the full, original-resolution data.")
+
                         st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
 
                         # Download button for data without well simulation
@@ -1209,18 +1222,27 @@ def main():
                             
                             # Plot baseline vs adjusted predictions
                             fig_well = go.Figure()
+                            
+                            # Downsample data for plotting if it's too large
+                            if len(scenario_data) > 2000:
+                                plot_target = scenario_data[target_col].resample('D').mean()
+                                plot_adjusted = adjusted_series.resample('D').mean()
+                            else:
+                                plot_target = scenario_data[target_col]
+                                plot_adjusted = adjusted_series
+
                             fig_well.add_trace(
                                 go.Scatter(
-                                    x=scenario_data.index,
-                                    y=scenario_data[target_col],
+                                    x=plot_target.index,
+                                    y=plot_target.values,
                                     name='Original Predictions',
                                     mode='lines'
                                 )
                             )
                             fig_well.add_trace(
                                 go.Scatter(
-                                    x=adjusted_series.index,
-                                    y=adjusted_series.values,
+                                    x=plot_adjusted.index,
+                                    y=plot_adjusted.values,
                                     name='Adjusted with New Wells',
                                     mode='lines'
                                 )
@@ -1313,10 +1335,18 @@ def main():
                             # Plot adjusted input features
                             st.subheader("Adjusted Input Features from New Wells")
 
+                            # Downsample data for plotting if it's too large
+                            if len(future_features) > 2000:
+                                plot_future_features = future_features.resample('D').mean()
+                                plot_adjusted_features = adjusted_future_features.resample('D').mean()
+                            else:
+                                plot_future_features = future_features
+                                plot_adjusted_features = adjusted_future_features
+
                             # Plot for Brine Flowrate
                             fig_brine = go.Figure()
-                            fig_brine.add_trace(go.Scatter(x=future_features.index, y=future_features["Brine Flowrate (T/h)"], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
-                            fig_brine.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["Brine Flowrate (T/h)"], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
+                            fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features["Brine Flowrate (T/h)"], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
+                            fig_brine.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features["Brine Flowrate (T/h)"], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
                             for pulse_time in pulses:
                                 fig_brine.add_vline(x=pulse_time, line_color="red")
                             fig_brine.update_layout(title='Brine Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
@@ -1324,8 +1354,8 @@ def main():
 
                             # Plot for NCG+Steam Flowrate
                             fig_ncg = go.Figure()
-                            fig_ncg.add_trace(go.Scatter(x=future_features.index, y=future_features["NCG+Steam Flowrate (T/h)"], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
-                            fig_ncg.add_trace(go.Scatter(x=adjusted_future_features.index, y=adjusted_future_features["NCG+Steam Flowrate (T/h)"], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
+                            fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features["NCG+Steam Flowrate (T/h)"], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
+                            fig_ncg.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features["NCG+Steam Flowrate (T/h)"], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
                             for pulse_time in pulses:
                                 fig_ncg.add_vline(x=pulse_time, line_color="red")
                             fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
