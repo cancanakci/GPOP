@@ -1019,6 +1019,12 @@ def main():
                             del st.session_state.scenario_data
                         if 'adjusted_series' in st.session_state:
                             del st.session_state.adjusted_series
+                        if 'pulses' in st.session_state:
+                            del st.session_state.pulses
+                        if 'adjusted_future_features' in st.session_state:
+                            del st.session_state.adjusted_future_features
+                        if 'future_features' in st.session_state:
+                            del st.session_state.future_features
                         st.rerun()
 
                     if 'scenario_data' in st.session_state:
@@ -1213,8 +1219,24 @@ def main():
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
                             adjusted_series.loc[scenario_data.index > split_date] = adjusted_future_power
+                            
+                            # Store all simulation results in session state to persist them across reruns
                             st.session_state.adjusted_series = adjusted_series
+                            st.session_state.pulses = pulses
+                            st.session_state.adjusted_future_features = adjusted_future_features
+                            st.session_state.future_features = future_features # For comparison plots
 
+                        # ---------------------------------------------------------------
+                        
+                        # Display simulation results if they exist in the session state
+                        if 'adjusted_series' in st.session_state:
+                            # Retrieve data from session state
+                            adjusted_series = st.session_state.adjusted_series
+                            pulses = st.session_state.pulses
+                            adjusted_future_features = st.session_state.adjusted_future_features
+                            future_features = st.session_state.future_features
+                            split_date = scenario_data.index[-1] - pd.DateOffset(years=years) # Recalculate here
+                            
                             # Plot baseline vs adjusted predictions
                             fig_well = go.Figure()
                             fig_well.add_trace(
@@ -1359,8 +1381,6 @@ def main():
                                 mime="text/csv",
                                 key="download_with_sim"
                             )
-
-                        # ---------------------------------------------------------------
 
             except Exception as e:
                 st.error(f"Error loading model data: {str(e)}")
