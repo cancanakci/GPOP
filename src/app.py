@@ -498,7 +498,7 @@ def display_model_metrics(metrics):
     else:
         st.sidebar.warning("No model metrics found.")
 
-def create_scenario_dataframe(historical_df, years, feature_trends):
+def create_scenario_dataframe(historical_df, years, feature_trends, progress_placeholder):
     """
     Creates a scenario dataframe by extrapolating historical data based on seasonality and trends.
     It uses time-series decomposition to separate trend, seasonality, and residuals.
@@ -992,11 +992,17 @@ def main():
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("Generate Scenario"):
+                            # Add a placeholder for the progress bar
+                            progress_placeholder = st.empty()
+                            
                             # Create scenario dataframe with extrapolated features (exclude target)
-                            scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
+                            scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends, progress_placeholder)
                             scenario_data = scenario_features.copy()
 
                             if model and scaler:
+                                # Update progress bar for prediction step
+                                progress_placeholder.progress(0.8, text="Applying model to predict power output...")
+
                                 # Prepare data for prediction
                                 X_all = scenario_data[selected_features]
                                 X_scaled = scaler.transform(X_all)
@@ -1014,6 +1020,9 @@ def main():
                                 st.session_state.years = years
                                 st.session_state.target_col = target_col
                                 st.session_state.feature_trends = feature_trends
+                                
+                                # Update progress to complete
+                                progress_placeholder.progress(1.0, text="Scenario generation complete!")
 
                             else:
                                 st.error("Failed to load the model. Please ensure the model files exist.")
@@ -1093,6 +1102,9 @@ def main():
                         )
 
                         if st.button("Simulate New Wells"):
+                            # Add a placeholder for the progress bar
+                            progress_placeholder = st.empty()
+                            
                             def apply_well_drilling_strategy(
                                 initial_future_features,
                                 initial_future_power,
@@ -1123,7 +1135,10 @@ def main():
                                     freq='YS'
                                 )
 
-                                for start_of_year in year_starts:
+                                num_years = len(year_starts)
+                                progress_bar = progress_placeholder.progress(0, text="Simulation starting...")
+
+                                for i, start_of_year in enumerate(year_starts):
                                     end_of_year = start_of_year + pd.DateOffset(years=1)
                                     yearly_mask = (adjusted_power.index >= start_of_year) & (adjusted_power.index < end_of_year)
 
@@ -1174,6 +1189,9 @@ def main():
                                             new_predictions = model.predict(X_scaled)
                                             adjusted_power = pd.Series(new_predictions, index=adjusted_features.index)
                                 
+                                    # Update progress bar
+                                    progress_bar.progress((i + 1) / num_years, text=f"Simulating year {start_of_year.year}...")
+
                                 return adjusted_power, well_drilling_dates, adjusted_features
 
                             # Prepare data for the simulation function
@@ -1191,6 +1209,9 @@ def main():
                                 steam_percentage,
                                 feature_trends
                             )
+                            # Update progress bar to completion
+                            progress_placeholder.progress(1.0, text="Simulation complete!")
+                            
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
                             adjusted_series.loc[scenario_data.index > split_date] = adjusted_future_power
