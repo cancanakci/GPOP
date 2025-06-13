@@ -1035,7 +1035,7 @@ def main():
                         # Download button for data without well simulation
                         csv_no_sim = scenario_data.round(4).to_csv()
                         st.download_button(
-                            label="Download Scenario Data (no simulation)",
+                            label="Download Scenario Data (no MUW simulation)",
                             data=csv_no_sim,
                             file_name="scenario_predictions_no_simulation.csv",
                             mime="text/csv",
@@ -1353,9 +1353,9 @@ def main():
                             
                             csv_with_sim = download_df_sim.round(4).to_csv()
                             st.download_button(
-                                label="Download Scenario Data (with simulation)",
+                                label="Download Scenario Data (with MUW simulation)",
                                 data=csv_with_sim,
-                                file_name="scenario_predictions_with_simulation.csv",
+                                file_name="scenario_predictions_with_MUW_simulation.csv",
                                 mime="text/csv",
                                 key="download_with_sim"
                             )
