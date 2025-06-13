@@ -87,70 +87,39 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         'objective': 'reg:squarederror',
         'n_estimators': 300,
         'learning_rate': 0.05,
-        'max_depth': 3,
+        'max_depth': 5,
         'min_child_weight': 5,
         'subsample': 0.8,
         'colsample_bytree': 0.8,
         'random_state': 42,
         'n_jobs': -1,
-        'eval_metric': 'rmse'
+        'eval_metric': 'rmse',
+        'early_stopping_rounds': 50
     }
     
     if is_default:
-        # Define parameter grid for grid search
-        param_grid = {
-            'n_estimators': [100, 200, 300],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'max_depth': [4, 6, 8],
-            'min_child_weight': [1, 3, 5],
-            'subsample': [0.6, 0.8, 1.0],
-            'colsample_bytree': [0.6, 0.8, 1.0]
-        }
-        
-        # Create base model for grid search
-        base_model = xgb.XGBRegressor(
-            objective='reg:squarederror',
-            random_state=42,
-            n_jobs=-1,
-            eval_metric='rmse'
-        )
-        
-        # Perform grid search with cross-validation
-        print("Performing grid search for optimal hyperparameters...")
-        grid_search = GridSearchCV(
-            estimator=base_model,
-            param_grid=param_grid,
-            cv=5,
-            scoring='neg_root_mean_squared_error',
-            n_jobs=-1,
-            verbose=1
-        )
-        
-        grid_search.fit(X_train_scaled, y_train)
-        
-        # Get best parameters
-        best_params = grid_search.best_params_
-        print(f"Best parameters found: {best_params}")
-        
-        # Update default parameters with best parameters
-        default_params.update(best_params)
-        
-        # Add early stopping
-        default_params['early_stopping_rounds'] = 50
-    
+        # The grid search functionality has been removed for the default model
+        # to ensure a simpler and faster process. The model will now train
+        # using a predefined set of optimized default parameters.
+        print("Skipping hyperparameter tuning for the default model.")
+
     # Update default parameters with custom parameters if provided
     if model_params:
         default_params.update(model_params)
     
     xgb_model = xgb.XGBRegressor(**default_params)
 
-    # Perform k-fold cross-validation
-    print(f"\nPerforming {n_splits}-fold cross-validation...")
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    # --- Cross-validation ---
+    print("\nPerforming 5-fold cross-validation...")
     
-    # Cross-validation scores for different metrics
-    cv_r2_scores = cross_val_score(xgb_model, X_train_scaled, y_train, cv=kf, scoring='r2')
-    cv_mse_scores = -cross_val_score(xgb_model, X_train_scaled, y_train, cv=kf, scoring='neg_mean_squared_error')
+    # Create a new dictionary of parameters without early stopping for CV
+    cv_params = xgb_model.get_params()
+    cv_params.pop('early_stopping_rounds', None)
+    cv_model = xgb.XGBRegressor(**cv_params)
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    cv_r2_scores = cross_val_score(cv_model, X_train_scaled, y_train, cv=kf, scoring='r2')
+    cv_mse_scores = -cross_val_score(cv_model, X_train_scaled, y_train, cv=kf, scoring='neg_mean_squared_error')
     cv_rmse_scores = np.sqrt(cv_mse_scores)
     
     print(f"Cross-validation R² scores: {cv_r2_scores}")
@@ -249,13 +218,6 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         'predicted': xgb_preds.tolist(),
         'training_data_path': training_data_path
     }
-    
-    if is_default:
-        metrics['grid_search_results'] = {
-            'best_params': grid_search.best_params_,
-            'best_score': float(grid_search.best_score_),
-            'cv_results': grid_search.cv_results_
-        }
     
     # Save metrics to JSON file
     with open(metrics_path, 'w') as f:

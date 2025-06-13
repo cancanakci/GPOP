@@ -461,15 +461,6 @@ def display_model_metrics(metrics):
                      for i, score in enumerate(rmse_scores, 1):
                         st.write(f"Fold {i}: {score:.4f}")
 
-        # Display grid search results if available
-        grid_search_results = metrics.get('grid_search_results')
-        if grid_search_results:
-            st.sidebar.subheader("Grid Search Results")
-            st.sidebar.write("Best Parameters:")
-            for param, value in grid_search_results['best_params'].items():
-                st.sidebar.write(f"- {param}: {value}")
-            st.sidebar.write(f"Best RMSE Score: {-grid_search_results['best_score']:.4f}")
-
         with st.sidebar.expander("Model Parameters"):
             model_params = metrics.get('model_params', {})
             if model_params:
@@ -609,7 +600,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
         st.markdown("**Applied Modifiers:**")
         for feature, trend in feature_trends.items():
             if trend['type'] == 'linear':
-                st.write(f"- {feature}: Linear ({trend['params']['slope']*100:.2f}% per year)")
+                st.write(f"- {feature}: Linear ({trend['params']['slope']*100:.2f} per year)")
             elif trend['type'] == 'exponential':
                 st.write(f"- {feature}: Exponential ({trend['params']['growth_rate']*100:.2f}% per year)")
             elif trend['type'] == 'polynomial':
@@ -1075,19 +1066,13 @@ def main():
                             showlegend=False,
                             hovermode='x unified'
                         )
-                        st.plotly_chart(fig_yearly, use_container_width=True)
-                        yearly_df = pd.DataFrame({
-                            'Period': yearly_avg.index.strftime('%Y'),
-                            f'Average {target_col}': yearly_avg.values.round(2)
-                        })
-                        st.dataframe(yearly_df, use_container_width=True)
 
                         # ------------------ Well Drilling Simulation ------------------
                         st.subheader("Well Drilling Simulation")
                         threshold = st.number_input(
                             "Yearly average power threshold for drilling a new well (MW)",
                             min_value=0,
-                            value=35,
+                            value=30,
                             step=1,
                             key="well_threshold"
                         )
@@ -1102,7 +1087,7 @@ def main():
                             "Make-up Well Steam Percentage (%)",
                             min_value=0.0,
                             max_value=100.0,
-                            value=20.0,
+                            value=10.0,
                             step=1.0,
                             key="steam_percentage"
                         )
@@ -1116,12 +1101,14 @@ def main():
                                 feature_names,
                                 threshold,
                                 muw_flowrate,
-                                steam_percentage
+                                steam_percentage,
+                                feature_trends
                             ):
                                 """
                                 Iteratively simulates well drilling. When yearly average power drops below
                                 the threshold, a new well's contribution is added to the input features,
-                                and the future power output is re-predicted.
+                                and the future power output is re-predicted. The new well's contribution
+                                also decays over time according to the specified feature trends.
                                 """
                                 adjusted_features = initial_future_features.copy()
                                 adjusted_power = initial_future_power.copy()
@@ -1146,10 +1133,42 @@ def main():
                                         if yearly_average < threshold:
                                             drilling_date = start_of_year
                                             well_drilling_dates.append(drilling_date)
-
+                                            
                                             future_mask = adjusted_features.index >= drilling_date
-                                            adjusted_features.loc[future_mask, "Brine Flowrate (T/h)"] += delta_brine
-                                            adjusted_features.loc[future_mask, "NCG+Steam Flowrate (T/h)"] += delta_ncg
+                                            affected_dates = adjusted_features.loc[future_mask].index
+                                            years_from_drill = (affected_dates - drilling_date).days / 365.25
+
+                                            # --- Calculate decaying lift for Brine ---
+                                            brine_trend = feature_trends.get("Brine Flowrate (T/h)", {'type': 'constant'})
+                                            brine_initial_lift = pd.Series(delta_brine, index=affected_dates)
+                                            
+                                            if brine_trend['type'] == 'exponential':
+                                                brine_decayed_lift = brine_initial_lift * ((1 + brine_trend['params']['growth_rate']) ** years_from_drill)
+                                            elif brine_trend['type'] == 'linear':
+                                                yearly_decay_amount = delta_brine * brine_trend['params']['slope']
+                                                total_decay = yearly_decay_amount * years_from_drill
+                                                brine_decayed_lift = brine_initial_lift + total_decay
+                                            else: # Constant
+                                                brine_decayed_lift = brine_initial_lift
+                                            brine_decayed_lift = brine_decayed_lift.clip(lower=0)
+                                            
+                                            # --- Calculate decaying lift for NCG+Steam ---
+                                            ncg_trend = feature_trends.get("NCG+Steam Flowrate (T/h)", {'type': 'constant'})
+                                            ncg_initial_lift = pd.Series(delta_ncg, index=affected_dates)
+                                            
+                                            if ncg_trend['type'] == 'exponential':
+                                                ncg_decayed_lift = ncg_initial_lift * ((1 + ncg_trend['params']['growth_rate']) ** years_from_drill)
+                                            elif ncg_trend['type'] == 'linear':
+                                                yearly_decay_amount = delta_ncg * ncg_trend['params']['slope']
+                                                total_decay = yearly_decay_amount * years_from_drill
+                                                ncg_decayed_lift = ncg_initial_lift + total_decay
+                                            else: # Constant
+                                                ncg_decayed_lift = ncg_initial_lift
+                                            ncg_decayed_lift = ncg_decayed_lift.clip(lower=0)
+
+                                            # Add the decaying lifts
+                                            adjusted_features.loc[future_mask, "Brine Flowrate (T/h)"] += brine_decayed_lift
+                                            adjusted_features.loc[future_mask, "NCG+Steam Flowrate (T/h)"] += ncg_decayed_lift
 
                                             X_scaled = scaler.transform(adjusted_features[feature_names])
                                             new_predictions = model.predict(X_scaled)
@@ -1169,7 +1188,8 @@ def main():
                                 selected_features,
                                 threshold,
                                 muw_flowrate,
-                                steam_percentage
+                                steam_percentage,
+                                feature_trends
                             )
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
@@ -1204,8 +1224,6 @@ def main():
                                 hovermode='x unified'
                             )
                             st.plotly_chart(fig_well, use_container_width=True)
-
-                            st.write(f"Number of new wells to drill over projection period: **{len(pulses)}**")
 
                             # Plot yearly averages of the adjusted predictions
                             st.subheader("Yearly Power Predictions with New Wells")
@@ -1248,9 +1266,7 @@ def main():
 
                             # Plot quarterly averages of the adjusted predictions
                             st.subheader("Quarterly Power Predictions with New Wells")
-                            
                             quarterly_adjusted_avg = adjusted_series.resample('3M').mean()
-                            
                             fig_quarterly_well = go.Figure()
                             fig_quarterly_well.add_trace(
                                 go.Scatter(
@@ -1302,6 +1318,8 @@ def main():
                                 fig_ncg.add_vline(x=pulse_time, line_color="red")
                             fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
                             st.plotly_chart(fig_ncg, use_container_width=True)
+
+                            st.write(f"Number of new wells to drill over projection period: **{len(pulses)}**")
 
                         # ---------------------------------------------------------------
 
