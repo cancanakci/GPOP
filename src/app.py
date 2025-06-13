@@ -945,86 +945,81 @@ def main():
                         )
 
                         if trend_type != "Constant":
-                            col1, col2 = st.columns([1, 9])
-                            with col2:
-                                if trend_type == "Linear":
-                                    slope = st.number_input(
-                                        f"Annual change for {feature}",
-                                        value=defaults["value"] if defaults["type"] == "Linear" else 0.0,
+                            if trend_type == "Linear":
+                                slope = st.number_input(
+                                    f"Annual change for {feature}",
+                                    value=defaults["value"] if defaults["type"] == "Linear" else 0.0,
+                                    format="%.2f",
+                                    key=f"slope_{feature}"
+                                )
+                                feature_trends[feature] = {
+                                    'type': 'linear',
+                                    'params': {'slope': slope / 100}
+                                }
+                            elif trend_type == "Exponential":
+                                growth_rate = st.number_input(
+                                    f"Annual growth rate for {feature} (%)",
+                                    value=defaults["value"] if defaults["type"] == "Exponential" else 0.0,
+                                    format="%.2f",
+                                    key=f"growth_{feature}"
+                                )
+                                feature_trends[feature] = {
+                                    'type': 'exponential',
+                                    'params': {'growth_rate': growth_rate / 100}
+                                }
+                            elif trend_type == "Polynomial":
+                                degree = st.slider(
+                                    f"Polynomial degree for {feature}",
+                                    2, 5,
+                                    key=f"degree_{feature}"
+                                )
+                                coefficients = []
+                                for i in range(degree):
+                                    coef = st.number_input(
+                                        f"Coefficient for x^{i}",
+                                        value=0.0,
                                         format="%.2f",
-                                        key=f"slope_{feature}"
+                                        key=f"coef_{feature}_{i}"
                                     )
-                                    feature_trends[feature] = {
-                                        'type': 'linear',
-                                        'params': {'slope': slope / 100}
-                                    }
-                                elif trend_type == "Exponential":
-                                    growth_rate = st.number_input(
-                                        f"Annual growth rate for {feature} (%)",
-                                        value=defaults["value"] if defaults["type"] == "Exponential" else 0.0,
-                                        format="%.2f",
-                                        key=f"growth_{feature}"
-                                    )
-                                    feature_trends[feature] = {
-                                        'type': 'exponential',
-                                        'params': {'growth_rate': growth_rate / 100}
-                                    }
-                                elif trend_type == "Polynomial":
-                                    degree = st.slider(
-                                        f"Polynomial degree for {feature}",
-                                        2, 5,
-                                        key=f"degree_{feature}"
-                                    )
-                                    coefficients = []
-                                    for i in range(degree):
-                                        coef = st.number_input(
-                                            f"Coefficient for x^{i}",
-                                            value=0.0,
-                                            format="%.2f",
-                                            key=f"coef_{feature}_{i}"
-                                        )
-                                        coefficients.append(coef)
-                                    feature_trends[feature] = {
-                                        'type': 'polynomial',
-                                        'params': {'coefficients': coefficients}
-                                    }
+                                    coefficients.append(coef)
+                                feature_trends[feature] = {
+                                    'type': 'polynomial',
+                                    'params': {'coefficients': coefficients}
+                                }
 
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("Generate Scenario"):
-                            # Create scenario dataframe with extrapolated features (exclude target)
-                            scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
-                            scenario_data = scenario_features.copy()
+                    if st.button("Generate Scenario"):
+                        # Create scenario dataframe with extrapolated features (exclude target)
+                        scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
+                        scenario_data = scenario_features.copy()
 
-                            if model and scaler:
-                                # Prepare data for prediction
-                                X_all = scenario_data[selected_features]
-                                X_scaled = scaler.transform(X_all)
-                                predictions = model.predict(X_scaled)
+                        if model and scaler:
+                            # Prepare data for prediction
+                            X_all = scenario_data[selected_features]
+                            X_scaled = scaler.transform(X_all)
+                            predictions = model.predict(X_scaled)
 
-                                # For historical part, use original target; for future, use predictions
-                                n_hist = len(ts_data)
-                                scenario_data[target_col] = np.concatenate([
-                                    ts_data[target_col].values,
-                                    predictions[n_hist:]
-                                ])
-                                
-                                # Store generated data in session state
-                                st.session_state.scenario_data = scenario_data
-                                st.session_state.years = years
-                                st.session_state.target_col = target_col
-                                st.session_state.feature_trends = feature_trends
+                            # For historical part, use original target; for future, use predictions
+                            n_hist = len(ts_data)
+                            scenario_data[target_col] = np.concatenate([
+                                ts_data[target_col].values,
+                                predictions[n_hist:]
+                            ])
+                            
+                            # Store generated data in session state
+                            st.session_state.scenario_data = scenario_data
+                            st.session_state.years = years
+                            st.session_state.target_col = target_col
+                            st.session_state.feature_trends = feature_trends
 
-                            else:
-                                st.error("Failed to load the model. Please ensure the model files exist.")
+                        else:
+                            st.error("Failed to load the model. Please ensure the model files exist.")
                     
-                    with col2:
-                        if st.button("Clear Scenario"):
-                            if 'scenario_data' in st.session_state:
-                                del st.session_state.scenario_data
-                            if 'adjusted_series' in st.session_state:
-                                del st.session_state.adjusted_series
-                            st.rerun()
+                    if st.button("Clear Scenario"):
+                        if 'scenario_data' in st.session_state:
+                            del st.session_state.scenario_data
+                        if 'adjusted_series' in st.session_state:
+                            del st.session_state.adjusted_series
+                        st.rerun()
 
                     if 'scenario_data' in st.session_state:
                         # Retrieve data from session state
