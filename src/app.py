@@ -1005,28 +1005,19 @@ def main():
                                 predictions[n_hist:]
                             ])
                             
-                            # Store generated data in session state
+                            # Round data and store in session state
+                            scenario_data = scenario_data.round(4)
                             st.session_state.scenario_data = scenario_data
                             st.session_state.years = years
                             st.session_state.target_col = target_col
                             st.session_state.feature_trends = feature_trends
 
+                            # Also prepare and store the CSV data
+                            st.session_state.csv_no_sim = scenario_data.to_csv()
+
                         else:
                             st.error("Failed to load the model. Please ensure the model files exist.")
                     
-                    if st.button("Clear Scenario"):
-                        if 'scenario_data' in st.session_state:
-                            del st.session_state.scenario_data
-                        if 'adjusted_series' in st.session_state:
-                            del st.session_state.adjusted_series
-                        if 'pulses' in st.session_state:
-                            del st.session_state.pulses
-                        if 'adjusted_future_features' in st.session_state:
-                            del st.session_state.adjusted_future_features
-                        if 'future_features' in st.session_state:
-                            del st.session_state.future_features
-                        st.rerun()
-
                     if 'scenario_data' in st.session_state:
                         # Retrieve data from session state
                         scenario_data = st.session_state.scenario_data
@@ -1039,14 +1030,14 @@ def main():
                         st.plotly_chart(plot_scenario(scenario_data.round(2), years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
 
                         # Download button for data without well simulation
-                        csv_no_sim = scenario_data.round(4).to_csv()
-                        st.download_button(
-                            label="Download Scenario Data (no MUW simulation)",
-                            data=csv_no_sim,
-                            file_name="scenario_predictions_no_simulation.csv",
-                            mime="text/csv",
-                            key="download_no_sim"
-                        )
+                        if 'csv_no_sim' in st.session_state:
+                            st.download_button(
+                                label="Download Scenario Data (no MUW simulation)",
+                                data=st.session_state.csv_no_sim,
+                                file_name="scenario_predictions_no_simulation.csv",
+                                mime="text/csv",
+                                key="download_no_sim"
+                            )
 
                         # Calculate and display yearly averages of projected predictions (future)
                         split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
@@ -1106,7 +1097,6 @@ def main():
                         )
 
                         if st.button("Simulate New Wells"):
-                            # Add a placeholder for the progress bar
                             progress_placeholder = st.empty()
                             
                             def apply_well_drilling_strategy(
@@ -1213,29 +1203,37 @@ def main():
                                 steam_percentage,
                                 feature_trends
                             )
-                            # Update progress bar to completion
                             progress_placeholder.progress(1.0, text="Simulation complete!")
                             
                             # Combine historical and adjusted future series
                             adjusted_series = scenario_data[target_col].copy()
                             adjusted_series.loc[scenario_data.index > split_date] = adjusted_future_power
                             
-                            # Store all simulation results in session state to persist them across reruns
+                            # Round results before storing
+                            adjusted_series = adjusted_series.round(4)
+                            adjusted_future_features = adjusted_future_features.round(4)
+
+                            # Store all simulation results in session state
                             st.session_state.adjusted_series = adjusted_series
                             st.session_state.pulses = pulses
                             st.session_state.adjusted_future_features = adjusted_future_features
-                            st.session_state.future_features = future_features # For comparison plots
 
-                        # ---------------------------------------------------------------
-                        
-                        # Display simulation results if they exist in the session state
+                            # Also prepare and store the CSV data for the simulation
+                            split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
+                            selected_features = [col for col in ts_data.columns if col != target_col]
+                            hist_features = scenario_data[scenario_data.index <= split_date][selected_features]
+                            full_adjusted_features = pd.concat([hist_features, adjusted_future_features])
+                            download_df_sim = full_adjusted_features.copy()
+                            download_df_sim[f'{target_col} (no makeup well)'] = scenario_data[target_col]
+                            download_df_sim[f'{target_col} (with makeup wells)'] = adjusted_series
+                            st.session_state.csv_with_sim = download_df_sim.to_csv()
+
                         if 'adjusted_series' in st.session_state:
-                            # Retrieve data from session state
+                            # Retrieve results from session state
                             adjusted_series = st.session_state.adjusted_series
                             pulses = st.session_state.pulses
                             adjusted_future_features = st.session_state.adjusted_future_features
-                            future_features = st.session_state.future_features
-                            split_date = scenario_data.index[-1] - pd.DateOffset(years=years) # Recalculate here
+                            future_features = scenario_data[scenario_data.index > split_date][selected_features]
                             
                             # Plot baseline vs adjusted predictions
                             fig_well = go.Figure()
@@ -1364,23 +1362,16 @@ def main():
                             st.subheader(f"Number of make-up wells to drill over {years} years: **{len(pulses)}**")
 
                             # Download button for data with well simulation
-                            # Reconstruct the full features dataframe with adjustments
-                            hist_features = scenario_data[scenario_data.index <= split_date][selected_features]
-                            full_adjusted_features = pd.concat([hist_features, adjusted_future_features])
+                            if 'csv_with_sim' in st.session_state:
+                                st.download_button(
+                                    label="Download Scenario Data (with MUW simulation)",
+                                    data=st.session_state.csv_with_sim,
+                                    file_name="scenario_predictions_with_MUW_simulation.csv",
+                                    mime="text/csv",
+                                    key="download_with_sim"
+                                )
 
-                            # Create the download dataframe
-                            download_df_sim = full_adjusted_features.copy()
-                            download_df_sim[f'{target_col} (no makeup well)'] = scenario_data[target_col]
-                            download_df_sim[f'{target_col} (with makeup wells)'] = adjusted_series
-                            
-                            csv_with_sim = download_df_sim.round(4).to_csv()
-                            st.download_button(
-                                label="Download Scenario Data (with MUW simulation)",
-                                data=csv_with_sim,
-                                file_name="scenario_predictions_with_MUW_simulation.csv",
-                                mime="text/csv",
-                                key="download_with_sim"
-                            )
+                        # ---------------------------------------------------------------
 
             except Exception as e:
                 st.error(f"Error loading model data: {str(e)}")
