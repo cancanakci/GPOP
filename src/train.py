@@ -85,10 +85,10 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     # Use custom parameters if provided, otherwise use defaults
     default_params = {
         'objective': 'reg:squarederror',
-        'n_estimators': 200,
+        'n_estimators': 300,
         'learning_rate': 0.05,
-        'max_depth': 6,
-        'min_child_weight': 1,
+        'max_depth': 3,
+        'min_child_weight': 5,
         'subsample': 0.8,
         'colsample_bytree': 0.8,
         'random_state': 42,

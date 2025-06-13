@@ -9,3 +9,5 @@ plotly
 openpyxl
 tabulate
 xgboost
+statsmodels
+statsmodels

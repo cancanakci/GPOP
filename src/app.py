@@ -18,6 +18,7 @@ from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
@@ -507,56 +508,91 @@ def display_model_metrics(metrics):
         st.sidebar.warning("No model metrics found.")
 
 def create_scenario_dataframe(historical_df, years, feature_trends):
-    """Create a scenario dataframe by extrapolating historical patterns and applying trends."""
-    # Calculate number of periods to generate
+    """
+    Creates a scenario dataframe by extrapolating historical data based on seasonality and trends.
+    It uses time-series decomposition to separate trend, seasonality, and residuals.
+    """
     freq = historical_df.index.freq
-    periods = int(years * 365.25 * 24 / pd.Timedelta(freq).total_seconds() * 3600)
-    
-    # Create future date range
-    future_dates = pd.date_range(
-        start=historical_df.index[-1] + pd.Timedelta(freq),
-        periods=periods,
-        freq=freq
-    )
-    
-    # Initialize future dataframe
+    if freq is None:
+        # If frequency is not set, infer it
+        freq = pd.infer_freq(historical_df.index)
+
+    # Create a precise future index using DateOffset, which correctly handles leap years
+    future_start = historical_df.index[-1] + freq
+    future_end = future_start + pd.DateOffset(years=years) - freq
+    future_dates = pd.date_range(start=future_start, end=future_end, freq=freq)
+    periods = len(future_dates)
+
+    # Create a future dataframe with the precise index
     future_df = pd.DataFrame(index=future_dates)
-    
-    # For each feature, extrapolate the pattern and apply trends
+
+    # Estimate periods per year for seasonality decomposition (this can be an approximation)
+    periods_per_year = int(pd.Timedelta(days=365.25) / pd.to_timedelta(freq))
+
     for feature in historical_df.columns:
-        if feature in feature_trends:
-            # Get the trend configuration
-            trend = feature_trends[feature]
+        # Decompose the time series
+        # Ensure there are enough periods for decomposition (at least 2 full cycles)
+        seasonal_periods = periods_per_year
+        if len(historical_df[feature]) > 2 * seasonal_periods:
+            decomposition = seasonal_decompose(historical_df[feature], model='additive', period=seasonal_periods)
             
-            # Get the historical pattern (last year of data)
-            historical_pattern = historical_df[feature].iloc[-int(365.25 * 24 / pd.Timedelta(freq).total_seconds() * 3600):]
+            # Extrapolate Trend
+            trend_series = decomposition.trend.dropna()
+            x = np.arange(len(trend_series))
+            future_x = np.arange(len(trend_series), len(trend_series) + periods)
             
-            # Create the base pattern by repeating the historical pattern
-            base_pattern = np.tile(historical_pattern.values, int(np.ceil(periods / len(historical_pattern))))
-            base_pattern = base_pattern[:periods]  # Trim to exact length needed
+            # Fit a line to the historical trend to project it forward
+            trend_fit = np.polyfit(x, trend_series, 1)
+            future_trend_values = np.polyval(trend_fit, future_x)
             
-            # Apply the trend modifier
-            if trend['type'] == 'linear':
-                # Create linear trend
-                trend_factor = 1 + np.linspace(0, trend['params']['slope'] * years, periods)
-                future_df[feature] = base_pattern * trend_factor
+            # Apply user-defined modifications on top of the extrapolated base trend
+            if feature in feature_trends:
+                trend_mod = feature_trends[feature]
+                time_factor = np.linspace(0, years, periods)
                 
-            elif trend['type'] == 'exponential':
-                # Create exponential trend
-                trend_factor = np.exp(np.linspace(0, trend['params']['growth_rate'] * years, periods))
-                future_df[feature] = base_pattern * trend_factor
-                
-            elif trend['type'] == 'polynomial':
-                # Create polynomial trend
-                x = np.linspace(0, years, periods)
-                trend_factor = np.polyval(trend['params']['coefficients'], x)
-                future_df[feature] = base_pattern * trend_factor
-                
+                if trend_mod['type'] == 'linear':
+                    future_trend_values += time_factor * trend_mod['params']['slope'] * trend_series.mean()
+                elif trend_mod['type'] == 'exponential':
+                    future_trend_values *= (1 + trend_mod['params']['growth_rate']) ** time_factor
+
+            # Extrapolate Seasonality by tiling
+            seasonal_values = decomposition.seasonal.iloc[-seasonal_periods:]
+            future_seasonal_values = np.tile(seasonal_values, int(np.ceil(periods / seasonal_periods)))[:periods]
+
+            # Extrapolate Residuals by random sampling
+            residuals = decomposition.resid.dropna()
+            future_residuals = np.random.choice(residuals, size=periods, replace=True)
+
+            # Combine components
+            future_df[feature] = future_trend_values + future_seasonal_values + future_residuals
+        
         else:
-            # For features without trends, just repeat the historical pattern
-            historical_pattern = historical_df[feature].iloc[-int(365.25 * 24 / pd.Timedelta(freq).total_seconds() * 3600):]
-            future_df[feature] = np.tile(historical_pattern.values, int(np.ceil(periods / len(historical_pattern))))[:periods]
-    
+            # Fallback for short series: repeat the last year with a simple trend
+            last_year_data = historical_df[feature].iloc[-periods_per_year:]
+
+            if len(last_year_data) == 0:
+                future_df[feature] = 0
+                continue
+
+            # Use the actual length of the sliced data to calculate the number of repetitions
+            num_repeats = int(np.ceil(periods / len(last_year_data)))
+            base_pattern = np.tile(last_year_data.values, num_repeats)[:periods]
+
+            future_values = base_pattern.copy().astype(float)
+
+            if feature in feature_trends:
+                trend_mod = feature_trends[feature]
+                time_factor = np.linspace(0, years, periods)
+
+                if trend_mod['type'] == 'linear':
+                    trend_effect = time_factor * trend_mod['params']['slope']
+                    future_values += trend_effect * np.mean(base_pattern)
+                elif trend_mod['type'] == 'exponential':
+                    trend_effect = (1 + trend_mod['params']['growth_rate']) ** time_factor
+                    future_values *= trend_effect
+            
+            future_df[feature] = future_values
+
     # Combine historical and future data
     scenario_df = pd.concat([historical_df, future_df])
     
@@ -675,6 +711,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     fig.update_yaxes(title_text=target_col, row=1, col=1)
     for i, feature in enumerate(features, 2):
         fig.update_yaxes(title_text=feature, row=i, col=1)
+
     return fig
 
 def main():
@@ -888,14 +925,31 @@ def main():
                 if selected_features:
                     # Configure trends
                     st.subheader("Feature Trends")
-                    years = st.slider("Number of years to project", 1, 30, 10)
+                    years = st.slider("Number of years to project", 1, 50, 20)
+
+                    # --- Default trend settings ---
+                    default_trends = {
+                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -2.0},
+                        "Fluid Temperature (°C)": {"type": "Linear", "value": -1.0},
+                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -2.0},
+                        "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0},
+                        "Heat Exchanger Pressure Differential (Bar)": {"type": "Constant", "value": 0.0},
+                        "Reinjection Temperature (°C)": {"type": "Linear", "value": 0.5}
+                    }
 
                     feature_trends = {}
                     for feature in selected_features:
                         st.write(f"### {feature}")
+
+                        # Get default settings for the current feature
+                        defaults = default_trends.get(feature, {"type": "Constant", "value": 0.0})
+                        trend_options = ["Constant", "Linear", "Exponential", "Polynomial"]
+                        default_index = trend_options.index(defaults["type"])
+
                         trend_type = st.selectbox(
                             "Select Trend Type",
-                            ["Constant", "Linear", "Exponential", "Polynomial"],
+                            trend_options,
+                            index=default_index,
                             key=f"trend_{feature}"
                         )
 
@@ -905,7 +959,7 @@ def main():
                                 if trend_type == "Linear":
                                     slope = st.number_input(
                                         f"Annual change for {feature} (%)",
-                                        value=0.0,
+                                        value=defaults["value"] if defaults["type"] == "Linear" else 0.0,
                                         format="%.2f",
                                         key=f"slope_{feature}"
                                     )
@@ -916,7 +970,7 @@ def main():
                                 elif trend_type == "Exponential":
                                     growth_rate = st.number_input(
                                         f"Annual growth rate for {feature} (%)",
-                                        value=0.0,
+                                        value=defaults["value"] if defaults["type"] == "Exponential" else 0.0,
                                         format="%.2f",
                                         key=f"growth_{feature}"
                                     )
@@ -944,38 +998,267 @@ def main():
                                         'params': {'coefficients': coefficients}
                                     }
 
-                    if st.button("Generate Scenario"):
-                        # Create scenario dataframe with extrapolated features (exclude target)
-                        scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
-                        scenario_data = scenario_features.copy()
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Generate Scenario"):
+                            # Create scenario dataframe with extrapolated features (exclude target)
+                            scenario_features = create_scenario_dataframe(ts_data[selected_features], years, feature_trends)
+                            scenario_data = scenario_features.copy()
 
-                        if model and scaler:
-                            # Prepare data for prediction
-                            X_all = scenario_data[selected_features]
-                            X_scaled = scaler.transform(X_all)
-                            predictions = model.predict(X_scaled)
+                            if model and scaler:
+                                # Prepare data for prediction
+                                X_all = scenario_data[selected_features]
+                                X_scaled = scaler.transform(X_all)
+                                predictions = model.predict(X_scaled)
 
-                            # For historical part, use original target; for future, use predictions
-                            n_hist = len(ts_data)
-                            scenario_data[target_col] = np.concatenate([
-                                ts_data[target_col].values,
-                                predictions[n_hist:]
-                            ])
+                                # For historical part, use original target; for future, use predictions
+                                n_hist = len(ts_data)
+                                scenario_data[target_col] = np.concatenate([
+                                    ts_data[target_col].values,
+                                    predictions[n_hist:]
+                                ])
+                                
+                                # Store generated data in session state
+                                st.session_state.scenario_data = scenario_data
+                                st.session_state.years = years
+                                st.session_state.target_col = target_col
+                                st.session_state.feature_trends = feature_trends
 
-                            # Display results
-                            st.subheader(f"Feature Trends and {target_col} Predictions")
-                            st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+                            else:
+                                st.error("Failed to load the model. Please ensure the model files exist.")
+                    
+                    with col2:
+                        if st.button("Clear Scenario"):
+                            if 'scenario_data' in st.session_state:
+                                del st.session_state.scenario_data
+                            st.rerun()
 
-                            # Add download button for scenario data
-                            csv = scenario_data.to_csv()
-                            st.download_button(
-                                label="Download scenario data as CSV",
-                                data=csv,
-                                file_name="scenario_predictions.csv",
-                                mime="text/csv"
+                    if 'scenario_data' in st.session_state:
+                        # Retrieve data from session state
+                        scenario_data = st.session_state.scenario_data
+                        years = st.session_state.years
+                        target_col = st.session_state.target_col
+                        feature_trends = st.session_state.feature_trends
+                        
+                        # Display results
+                        st.subheader(f"Feature Trends and {target_col} Predictions")
+                        st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
+
+                        # Calculate and display yearly averages of projected predictions (future)
+                        split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
+                        future_data = scenario_data[scenario_data.index > split_date]
+                        yearly_avg = future_data[target_col].resample('Y').mean()
+
+                        st.subheader("Yearly Averages of Projected Predictions")
+                        fig_yearly = go.Figure()
+                        fig_yearly.add_trace(
+                            go.Scatter(
+                                x=yearly_avg.index,
+                                y=yearly_avg.values,
+                                name='Yearly Average',
+                                mode='lines',
+                                line=dict(color='royalblue')
                             )
-                        else:
-                            st.error("Failed to load the model. Please ensure the model files exist.")
+                        )
+                        overall_mean = yearly_avg.mean()
+                        fig_yearly.add_hline(
+                            y=overall_mean,
+                            line_dash="dash",
+                            line_color="red",
+                            annotation_text=f"Overall Mean: {overall_mean:.2f}",
+                            annotation_position="top right"
+                        )
+                        fig_yearly.update_layout(
+                            title='Yearly Averages of Projected Predictions',
+                            xaxis_title='Year',
+                            yaxis_title=f'Average {target_col}',
+                            showlegend=False,
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_yearly, use_container_width=True)
+                        yearly_df = pd.DataFrame({
+                            'Period': yearly_avg.index.strftime('%Y'),
+                            f'Average {target_col}': yearly_avg.values.round(2)
+                        })
+                        st.dataframe(yearly_df, use_container_width=True)
+
+                        # ------------------ Well Drilling Simulation ------------------
+                        st.subheader("Well Drilling Simulation")
+                        threshold = st.number_input(
+                            "Yearly average power threshold for drilling a new well (MW)",
+                            min_value=0,
+                            value=35,
+                            step=1,
+                            key="well_threshold"
+                        )
+                        jump_magnitude = st.number_input(
+                            "Power increase per new well (MW)",
+                            min_value=0.1,
+                            value=5.0,
+                            step=0.1,
+                            key="well_jump"
+                        )
+
+                        if st.button("Simulate New Wells"):
+                            def apply_well_drilling_strategy(future_power_series, threshold, jump_magnitude):
+                                """
+                                Iteratively simulates well drilling on a yearly basis. When a yearly average drops
+                                below the threshold, the entire future curve is lifted. This is repeated
+                                for each year in the projection period.
+                                """
+                                adjusted_series = future_power_series.copy()
+                                well_drilling_dates = []
+
+                                # Generate all year-start timestamps for the projection period
+                                year_starts = pd.date_range(
+                                    start=future_power_series.index.min().to_period('Y').to_timestamp(),
+                                    end=future_power_series.index.max().to_period('Y').to_timestamp(),
+                                    freq='YS'
+                                )
+
+                                # Iterate through each year sequentially
+                                for start_of_year in year_starts:
+                                    end_of_year = start_of_year + pd.DateOffset(years=1)
+                                    
+                                    yearly_mask = (adjusted_series.index >= start_of_year) & (adjusted_series.index < end_of_year)
+
+                                    if yearly_mask.any():
+                                        # Calculate average on the *current*, potentially adjusted series
+                                        yearly_average = adjusted_series[yearly_mask].mean()
+
+                                        # If the average is below threshold, drill a well
+                                        if yearly_average < threshold:
+                                            # The well is "drilled" at the start of the year
+                                            drilling_date = start_of_year
+                                            well_drilling_dates.append(drilling_date)
+
+                                            # Lift the ENTIRE future curve from this point forward
+                                            adjusted_series.loc[adjusted_series.index >= drilling_date] += jump_magnitude
+                                
+                                return adjusted_series, well_drilling_dates
+
+                            adjusted_future, pulses = apply_well_drilling_strategy(future_data[target_col], threshold, jump_magnitude)
+                            # Combine historical and adjusted future series
+                            adjusted_series = scenario_data[target_col].copy()
+                            adjusted_series.loc[scenario_data.index > split_date] = adjusted_future
+
+                            # Plot baseline vs adjusted predictions
+                            fig_well = go.Figure()
+                            fig_well.add_trace(
+                                go.Scatter(
+                                    x=scenario_data.index,
+                                    y=scenario_data[target_col],
+                                    name='Original Predictions',
+                                    mode='lines'
+                                )
+                            )
+                            fig_well.add_trace(
+                                go.Scatter(
+                                    x=adjusted_series.index,
+                                    y=adjusted_series.values,
+                                    name='Adjusted with New Wells',
+                                    mode='lines'
+                                )
+                            )
+                            # Add vertical lines for pulses
+                            for pulse_time in pulses:
+                                fig_well.add_vline(x=pulse_time, line_color="red")
+
+                            fig_well.update_layout(
+                                title='Power Predictions with New Wells',
+                                xaxis_title='Date',
+                                yaxis_title=target_col,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_well, use_container_width=True)
+
+                            st.write(f"Number of new wells to drill over projection period: **{len(pulses)}**")
+
+                            # Plot yearly averages of the adjusted predictions
+                            st.subheader("Yearly Power Predictions with New Wells")
+                            
+                            # Resample the adjusted series to yearly frequency
+                            yearly_adjusted_avg = adjusted_series.resample('Y').mean()
+                            
+                            fig_yearly_well = go.Figure()
+                            fig_yearly_well.add_trace(
+                                go.Scatter(
+                                    x=yearly_adjusted_avg.index,
+                                    y=yearly_adjusted_avg.values,
+                                    name='Yearly Average',
+                                    mode='lines',
+                                    line=dict(color='darkblue')
+                                )
+                            )
+
+                            # Add vertical lines for pulses
+                            for pulse_time in pulses:
+                                fig_yearly_well.add_vline(x=pulse_time, line_color="red")
+                            
+                            # Add a line for the threshold
+                            fig_yearly_well.add_hline(
+                                y=threshold,
+                                line_dash="dot",
+                                line_color="red",
+                                annotation_text=f"Drilling Threshold: {threshold:.2f} MW",
+                                annotation_position="bottom right"
+                            )
+                            
+                            fig_yearly_well.update_layout(
+                                title='Yearly Average Power Predictions with New Wells',
+                                xaxis_title='Year',
+                                yaxis_title=f'Average {target_col}',
+                                showlegend=False,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_yearly_well, use_container_width=True)
+
+                            # Plot quarterly averages of the adjusted predictions
+                            st.subheader("Quarterly Power Predictions with New Wells")
+                            
+                            quarterly_adjusted_avg = adjusted_series.resample('3M').mean()
+                            
+                            fig_quarterly_well = go.Figure()
+                            fig_quarterly_well.add_trace(
+                                go.Scatter(
+                                    x=quarterly_adjusted_avg.index,
+                                    y=quarterly_adjusted_avg.values,
+                                    name='Quarterly Average',
+                                    mode='lines',
+                                    line=dict(color='darkcyan')
+                                )
+                            )
+
+                            for pulse_time in pulses:
+                                fig_quarterly_well.add_vline(x=pulse_time, line_color="red")
+                            
+                            fig_quarterly_well.add_hline(
+                                y=threshold,
+                                line_dash="dot",
+                                line_color="red",
+                                annotation_text=f"Drilling Threshold: {threshold:.2f} MW",
+                                annotation_position="bottom right"
+                            )
+                            
+                            fig_quarterly_well.update_layout(
+                                title='Quarterly Average Power Predictions with New Wells',
+                                xaxis_title='Quarter',
+                                yaxis_title=f'Average {target_col}',
+                                showlegend=False,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_quarterly_well, use_container_width=True)
+
+                        # ---------------------------------------------------------------
+
+                        # Add download button for scenario data
+                        csv = scenario_data.to_csv()
+                        st.download_button(
+                            label="Download scenario data as CSV",
+                            data=csv,
+                            file_name="scenario_predictions.csv",
+                            mime="text/csv"
+                        )
 
             except Exception as e:
                 st.error(f"Error loading model data: {str(e)}")
