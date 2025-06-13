@@ -1021,8 +1021,8 @@ def main():
                                 st.session_state.target_col = target_col
                                 st.session_state.feature_trends = feature_trends
                                 
-                                # Update progress to complete
-                                progress_placeholder.progress(1.0, text="Scenario generation complete!")
+                                # Rerun to display the results and ensure progress bar covers plotting
+                                st.rerun()
 
                             else:
                                 st.error("Failed to load the model. Please ensure the model files exist.")
@@ -1043,38 +1043,6 @@ def main():
                         # Display results
                         st.subheader(f"Feature Trends and {target_col} Predictions")
                         st.plotly_chart(plot_scenario(scenario_data, years, target_col=target_col, feature_trends=feature_trends), use_container_width=True)
-
-                        # Calculate and display yearly averages of projected predictions (future)
-                        split_date = scenario_data.index[-1] - pd.DateOffset(years=years)
-                        future_data = scenario_data[scenario_data.index > split_date]
-                        yearly_avg = future_data[target_col].resample('Y').mean()
-
-                        st.subheader("Yearly Averages of Projected Predictions")
-                        fig_yearly = go.Figure()
-                        fig_yearly.add_trace(
-                            go.Scatter(
-                                x=yearly_avg.index,
-                                y=yearly_avg.values,
-                                name='Yearly Average',
-                                mode='lines',
-                                line=dict(color='royalblue')
-                            )
-                        )
-                        overall_mean = yearly_avg.mean()
-                        fig_yearly.add_hline(
-                            y=overall_mean,
-                            line_dash="dash",
-                            line_color="red",
-                            annotation_text=f"Overall Mean: {overall_mean:.2f}",
-                            annotation_position="top right"
-                        )
-                        fig_yearly.update_layout(
-                            title='Yearly Averages of Projected Predictions',
-                            xaxis_title='Year',
-                            yaxis_title=f'Average {target_col}',
-                            showlegend=False,
-                            hovermode='x unified'
-                        )
 
                         # ------------------ Well Drilling Simulation ------------------
                         st.subheader("Well Drilling Simulation")
