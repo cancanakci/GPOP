@@ -22,8 +22,8 @@ def create_default_model():
         metrics = train_model(
             default_data_path, 
             "models", 
-            is_default=True,
-            datetime_col=datetime_col
+            datetime_col=datetime_col,
+            is_default=True
         )
         print("\nDefault model created successfully!")
         print("\nModel Performance Summary:")

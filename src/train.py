@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 
-def train_model(data_source, models_dir, target_column=None, datetime_col=None, n_splits=5, is_default=False, model_params=None, test_size=0.2):
+def train_model(data_source, models_dir, target_column=None, datetime_col=None, start_date=None, freq=None, n_splits=5, is_default=False, model_params=None, test_size=0.2):
     """Loads data, preprocesses it, trains XGBoost model with cross-validation, and saves model with metrics."""
     
     # Create timestamp for model versioning
@@ -31,10 +31,11 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
         metrics_path = os.path.join(models_dir, f"metrics_{timestamp}.json")
         training_data_path = os.path.join(models_dir, f"training_data_{timestamp}.pkl")
     
-    if datetime_col is None:
-        raise ValueError("datetime_col must be provided to train_model.")
+    # Validate that we have a method to create a datetime index
+    if datetime_col is None and start_date is None:
+        raise ValueError("Either 'datetime_col' or 'start_date' must be provided to train_model.")
 
-    df = load_and_parse(data_source, datetime_col=datetime_col)
+    df = load_and_parse(data_source, datetime_col=datetime_col, start_date=start_date, freq=freq)
 
     # --- Preprocessing (Interpolation) ---
     # Replicate the simple interpolation from the old preprocess_data function

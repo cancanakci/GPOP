@@ -46,15 +46,22 @@ def main():
                 try:
                     st.subheader("Time Series Settings")
                     
-                    # Read the file header from the in-memory buffer to get columns
-                    header_df = pd.read_excel(training_file, nrows=0) if training_file.name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(training_file, nrows=0)
-                    # IMPORTANT: Reset buffer to the beginning for the next read
-                    training_file.seek(0)
+                    has_datetime_col = st.checkbox("My data has a datetime column", value=True)
+                    
+                    if has_datetime_col:
+                        # Read the file header from the in-memory buffer to get columns
+                        header_df = pd.read_excel(training_file, nrows=0) if training_file.name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(training_file, nrows=0)
+                        # IMPORTANT: Reset buffer to the beginning for the next read
+                        training_file.seek(0)
+                        datetime_col = st.selectbox("Select your datetime column", header_df.columns.tolist())
+                        start_date = None
+                    else:
+                        start_date = st.date_input("Select a start date for your data")
+                        datetime_col = None
 
-                    datetime_col = st.selectbox("Select your datetime column", header_df.columns.tolist())
                     frequency = st.selectbox("Select data frequency", ["1min", "5min", "15min", "30min", "1h", "2h", "4h", "6h", "8h", "12h", "1d"], index=4)
 
-                    df = load_and_parse(training_file, datetime_col=datetime_col)
+                    df = load_and_parse(training_file, datetime_col=datetime_col, start_date=start_date, freq=frequency)
                     df = enforce_frequency(df, freq=frequency)
                     sanity_checks(df)
                     st.success("File loaded and preprocessed successfully!")
@@ -71,7 +78,6 @@ def main():
                     if target_col in numeric_cols:
                         numeric_cols.remove(target_col)
                     df = detect_and_impute_outliers(df, cols=numeric_cols)
-                    st.info("Outlier detection and imputation complete.")
 
                     st.session_state['training_data_for_viz'] = {
                         'X_train': df.drop(target_col, axis=1), 'y_train': df[target_col],
@@ -100,6 +106,8 @@ def main():
                             models_dir, 
                             target_column=target_col, 
                             datetime_col=datetime_col,
+                            start_date=start_date,
+                            freq=frequency,
                             model_params=st.session_state.get('model_params'), 
                             test_size=test_size
                         )

@@ -14,12 +14,15 @@ from typing import List, Tuple, Union, IO
 # ----------------------------------------------------------------------
 def load_and_parse(
     file_source: Union[str, Path, IO[bytes]],
-    datetime_col: str,
+    datetime_col: str = None,
+    start_date: str = None,
+    freq: str = None,
     drop_duplicates: bool = True,
 ) -> pd.DataFrame:
     """
     - Reads CSV/Parquet/Feather/Excel into pandas from a path or file-like object.
     - Parses the datetime column and sets it as a timezone-naive index.
+    - If no datetime column is provided, generates one from a start date and frequency.
     - Sorts chronologically.
     """
     file_name = ""
@@ -37,11 +40,17 @@ def load_and_parse(
     else: # Default to CSV
         df = pd.read_csv(file_source)
 
-    df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
-    if df[datetime_col].isna().any():
-        raise ValueError("Some rows have unparsable timestamps. Fix these first!")
-
-    df = df.sort_values(datetime_col).set_index(datetime_col)
+    if datetime_col:
+        df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
+        if df[datetime_col].isna().any():
+            raise ValueError("Some rows have unparsable timestamps. Fix these first!")
+        df = df.sort_values(datetime_col).set_index(datetime_col)
+    elif start_date and freq:
+        index = pd.date_range(start=start_date, periods=len(df), freq=freq, name="datetime")
+        df.set_index(index, inplace=True)
+        df.sort_index(inplace=True)
+    else:
+        raise ValueError("Either 'datetime_col' or both 'start_date' and 'freq' must be provided.")
 
     if drop_duplicates:
         before = len(df)
