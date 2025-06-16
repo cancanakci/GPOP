@@ -158,12 +158,15 @@ def create_scenario_dataframe(historical_df, years, feature_trends):
         if trend_mod.get('add_seasonality', True):
             seasonal_periods = periods_per_year
             if len(historical_df[feature]) > 2 * seasonal_periods:
-                decomposition = seasonal_decompose(historical_df[feature], model='additive', period=seasonal_periods)
-                seasonal_values = decomposition.seasonal.iloc[-seasonal_periods:]
-                future_seasonal_values = np.tile(seasonal_values, int(np.ceil(periods / seasonal_periods)))[:periods]
-                future_values += future_seasonal_values
+                try:
+                    decomposition = seasonal_decompose(historical_df[feature], model='additive', period=seasonal_periods)
+                    seasonal_values = decomposition.seasonal.iloc[-seasonal_periods:]
+                    future_seasonal_values = np.tile(seasonal_values, int(np.ceil(periods / seasonal_periods)))[:periods]
+                    future_values += future_seasonal_values
+                except Exception as e:
+                    st.warning(f"Could not determine seasonality for feature '{feature}': {e}. Proceeding without it.")
             else:
-                st.warning(f"Not enough data for feature '{feature}' to determine seasonality.")
+                st.warning(f"Not enough data for feature '{feature}' to determine seasonality (requires at least 2 full periods). Proceeding without it.")
 
         future_df[feature] = future_values
 
