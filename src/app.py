@@ -936,13 +936,14 @@ def main():
                 if selected_features:
                     # Configure trends
                     st.subheader("Feature Trends")
-                    years = st.slider("Number of years to project", 1, 50, 25)
+                    years = st.slider("Number of years to project", 1, 50, 20)
 
                     # --- Default trend settings ---
                     default_trends = {
                         "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
                         "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
                         "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0},
+                        "Heat Exchanger Pressure Differential (Bar)": {"type": "Freeze", "value": 0.0},
                     }
 
                     feature_trends = {}
