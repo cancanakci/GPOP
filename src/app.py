@@ -140,6 +140,23 @@ def display_data_visualizations(training_data, model=None):
     
     st.subheader("Training Data")
     
+    # Feature importance plot
+    if model is not None and hasattr(model, 'feature_importances_'):
+        importances = model.feature_importances_
+        feature_importance_df = pd.DataFrame({
+            'Feature': feature_names,
+            'Importance': importances
+        }).sort_values('Importance', ascending=False)
+
+        fig = px.bar(feature_importance_df, 
+                   x='Feature', 
+                   y='Importance',
+                   title='Feature Importance',
+                   labels={'Importance': 'Relative Importance'})
+        
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig)
+
     # Correlation Heatmap
     corr = df_combined.corr()
     fig = px.imshow(corr, text_auto=True, title='Feature Correlation Heatmap')
@@ -149,7 +166,7 @@ def display_data_visualizations(training_data, model=None):
         xaxis_nticks=len(corr.columns),
         yaxis_nticks=len(corr.index)
     )
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
     
     # Distribution plots for all features
     for col in df_combined.columns:
@@ -176,23 +193,6 @@ def display_data_visualizations(training_data, model=None):
         )
         
         st.plotly_chart(fig, use_container_width=True)
-    
-    # Feature importance plot
-    if model is not None and hasattr(model, 'feature_importances_'):
-        importances = model.feature_importances_
-        feature_importance_df = pd.DataFrame({
-            'Feature': feature_names,
-            'Importance': importances
-        }).sort_values('Importance', ascending=False)
-
-        fig = px.bar(feature_importance_df, 
-                   x='Feature', 
-                   y='Importance',
-                   title='Feature Importance',
-                   labels={'Importance': 'Relative Importance'})
-        
-        fig.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig)
 
 def display_prediction_visualizations(results_df, target_column='Target'):
     """Display visualizations for batch prediction results."""
@@ -507,9 +507,7 @@ def display_model_metrics(metrics):
 def create_scenario_dataframe(historical_df, years, feature_trends):
     """
     Creates a scenario dataframe.
-    - "Freeze": Projects the last known value forward (flat line).
-    - "Constant": Projects the last known value forward and adds historical seasonality.
-    - Other trends (Linear, Exp): Applies the trend to the last value and adds seasonality.
+    Projects the last known value forward, optionally applying a trend and/or seasonality.
     """
     freq = historical_df.index.freq
     if freq is None:
@@ -526,8 +524,8 @@ def create_scenario_dataframe(historical_df, years, feature_trends):
     periods_per_year = int(pd.Timedelta(days=365.25) / pd.to_timedelta(freq)) if freq else 365
 
     for feature in historical_df.columns:
-        # Get trend settings, default to 'Constant'
-        trend_mod = feature_trends.get(feature, {'type': 'Constant'})
+        # Get trend settings
+        trend_mod = feature_trends.get(feature, {'type': 'Constant', 'add_seasonality': True})
         
         # Start with the last known value as a constant baseline
         last_value = historical_df[feature].iloc[-1]
@@ -548,8 +546,8 @@ def create_scenario_dataframe(historical_df, years, feature_trends):
                 poly_trend = np.polyval(trend_mod['params']['coefficients'][::-1], time_factor)
                 future_values += poly_trend
         
-        # Add seasonality, unless the trend is 'Freeze'
-        if trend_mod['type'] != 'Freeze':
+        # Add seasonality, if selected
+        if trend_mod.get('add_seasonality', True): # Default to True for safety
             seasonal_periods = periods_per_year
             if len(historical_df[feature]) > 2 * seasonal_periods:
                 decomposition = seasonal_decompose(historical_df[feature], model='additive', period=seasonal_periods)
@@ -877,11 +875,18 @@ def main():
             target_col = training_data.get('target_column', None)
 
         if model and scaler and feature_names and training_data:
-            # Display training data visualizations
-            display_data_visualizations(training_data, model)
+            
+            explore_tab, predict_tab = st.tabs(["Explore Model", "Make Predictions"])
 
-            # Handle prediction workflow
-            handle_prediction_workflow(model, scaler, feature_names, training_data)
+            with explore_tab:
+                st.header("Model & Training Data Exploration")
+                # Display training data visualizations
+                display_data_visualizations(training_data, model)
+
+            with predict_tab:
+                st.header("Make Predictions with the Loaded Model")
+                # Handle prediction workflow
+                handle_prediction_workflow(model, scaler, feature_names, training_data)
 
             # Load and display metrics in sidebar
             metrics = None
@@ -940,10 +945,10 @@ def main():
 
                     # --- Default trend settings ---
                     default_trends = {
-                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
-                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
-                        "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0},
-                        "Heat Exchanger Pressure Differential (Bar)": {"type": "Freeze", "value": 0.0},
+                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0, "seasonality": True},
+                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0, "seasonality": True},
+                        "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0, "seasonality": True},
+                        "Heat Exchanger Pressure Differential (Bar)": {"type": "Constant", "value": 0.0, "seasonality": False},
                     }
 
                     feature_trends = {}
@@ -951,19 +956,29 @@ def main():
                         st.write(f"### {feature}")
 
                         # Get default settings for the current feature
-                        defaults = default_trends.get(feature, {"type": "Constant", "value": 0.0})
-                        trend_options = ["Freeze", "Constant", "Linear", "Exponential", "Polynomial"]
-                        default_index = trend_options.index(defaults["type"]) if defaults["type"] in trend_options else 1 # Default to 'Constant'
+                        defaults = default_trends.get(feature, {"type": "Constant", "value": 0.0, "seasonality": True})
+                        trend_options = ["Constant", "Linear", "Exponential", "Polynomial"]
+                        default_index = trend_options.index(defaults["type"]) if defaults["type"] in trend_options else 0
 
-                        trend_type = st.selectbox(
-                            "Select Trend Type",
-                            trend_options,
-                            index=default_index,
-                            key=f"trend_{feature}"
-                        )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            trend_type = st.selectbox(
+                                "Select Trend Type",
+                                trend_options,
+                                index=default_index,
+                                key=f"trend_{feature}"
+                            )
+                        with col2:
+                            add_seasonality = st.checkbox(
+                                "Seasonality",
+                                value=defaults.get("seasonality", True),
+                                key=f"seasonality_{feature}"
+                            )
 
-                        if trend_type == "Freeze":
-                            feature_trends[feature] = {'type': 'Freeze'}
+                        feature_trends[feature] = {
+                            'type': trend_type,
+                            'add_seasonality': add_seasonality
+                        }
                         
                         if trend_type == "Linear":
                             slope = st.number_input(
@@ -972,10 +987,7 @@ def main():
                                 format="%.2f",
                                 key=f"slope_{feature}"
                             )
-                            feature_trends[feature] = {
-                                'type': 'linear',
-                                'params': {'slope': slope}
-                            }
+                            feature_trends[feature]['params'] = {'slope': slope}
                         elif trend_type == "Exponential":
                             growth_rate = st.number_input(
                                 f"Annual growth rate for {feature} (%)",
@@ -983,10 +995,7 @@ def main():
                                 format="%.2f",
                                 key=f"growth_{feature}"
                             )
-                            feature_trends[feature] = {
-                                'type': 'exponential',
-                                'params': {'growth_rate': growth_rate / 100}
-                            }
+                            feature_trends[feature]['params'] = {'growth_rate': growth_rate / 100}
                         elif trend_type == "Polynomial":
                             degree = st.slider(
                                 f"Polynomial degree for {feature}",
@@ -1002,10 +1011,7 @@ def main():
                                     key=f"coef_{feature}_{i}"
                                 )
                                 coefficients.append(coef)
-                            feature_trends[feature] = {
-                                'type': 'polynomial',
-                                'params': {'coefficients': coefficients}
-                            }
+                            feature_trends[feature]['params'] = {'coefficients': coefficients}
 
                     if st.button("Generate Scenario"):
                         # Create scenario dataframe with extrapolated features (exclude target)
