@@ -1184,15 +1184,19 @@ def main():
                                             brine_trend = feature_trends.get(brine_col, {'type': 'constant'})
                                             brine_initial_lift = pd.Series(delta_brine, index=affected_dates)
                                             
-                                            if brine_trend['type'] == 'exponential':
+                                            if brine_trend['type'].lower() == 'exponential':
                                                 growth_rate = brine_trend['params']['growth_rate']
-                                                brine_decayed_lift = brine_initial_lift * ((1 + growth_rate) ** years_from_drill)
-                                            elif brine_trend['type'] == 'linear':
-                                                # The slope is the absolute change per year.
+                                                brine_decay_factor = (1 + growth_rate) ** years_from_drill
+                                                brine_decayed_lift = brine_initial_lift * brine_decay_factor
+                                            elif brine_trend['type'].lower() == 'linear':
+                                                # For linear, calculate an initial percentage decay based on the slope
+                                                # and apply that percentage decay to the new well's contribution.
+                                                last_val = initial_future_features[brine_col].iloc[0]
                                                 slope = brine_trend['params']['slope']
-                                                # The lift from the well also decays by the same absolute amount.
-                                                total_change = slope * years_from_drill
-                                                brine_decayed_lift = brine_initial_lift + total_change
+                                                # Avoid division by zero if the last value was 0
+                                                initial_perc_decay = (slope / last_val) if last_val != 0 else 0
+                                                brine_decay_factor = (1 + initial_perc_decay) ** years_from_drill
+                                                brine_decayed_lift = brine_initial_lift * brine_decay_factor
                                             else: # Constant
                                                 brine_decayed_lift = brine_initial_lift
                                             brine_decayed_lift = brine_decayed_lift.clip(lower=0)
@@ -1201,13 +1205,16 @@ def main():
                                             ncg_trend = feature_trends.get(steam_col, {'type': 'constant'})
                                             ncg_initial_lift = pd.Series(delta_ncg, index=affected_dates)
                                             
-                                            if ncg_trend['type'] == 'exponential':
+                                            if ncg_trend['type'].lower() == 'exponential':
                                                 growth_rate = ncg_trend['params']['growth_rate']
-                                                ncg_decayed_lift = ncg_initial_lift * ((1 + growth_rate) ** years_from_drill)
-                                            elif ncg_trend['type'] == 'linear':
+                                                ncg_decay_factor = (1 + growth_rate) ** years_from_drill
+                                                ncg_decayed_lift = ncg_initial_lift * ncg_decay_factor
+                                            elif ncg_trend['type'].lower() == 'linear':
+                                                last_val = initial_future_features[steam_col].iloc[0]
                                                 slope = ncg_trend['params']['slope']
-                                                total_change = slope * years_from_drill
-                                                ncg_decayed_lift = ncg_initial_lift + total_change
+                                                initial_perc_decay = (slope / last_val) if last_val != 0 else 0
+                                                ncg_decay_factor = (1 + initial_perc_decay) ** years_from_drill
+                                                ncg_decayed_lift = ncg_initial_lift * ncg_decay_factor
                                             else: # Constant
                                                 ncg_decayed_lift = ncg_initial_lift
                                             ncg_decayed_lift = ncg_decayed_lift.clip(lower=0)
