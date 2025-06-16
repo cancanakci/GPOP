@@ -44,20 +44,17 @@ def main():
 
             if training_file:
                 try:
-                    # Temporarily save uploaded file to disk to be read by pandas
-                    with open(training_file.name, "wb") as f:
-                        f.write(training_file.getbuffer())
-
                     st.subheader("Time Series Settings")
-                    if training_file.name.lower().endswith('.csv'):
-                        temp_df = pd.read_csv(training_file.name, nrows=0)
-                    else:
-                        temp_df = pd.read_excel(training_file.name, nrows=0)
+                    
+                    # Read the file header from the in-memory buffer to get columns
+                    header_df = pd.read_excel(training_file, nrows=0) if training_file.name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(training_file, nrows=0)
+                    # IMPORTANT: Reset buffer to the beginning for the next read
+                    training_file.seek(0)
 
-                    datetime_col = st.selectbox("Select your datetime column", temp_df.columns.tolist())
+                    datetime_col = st.selectbox("Select your datetime column", header_df.columns.tolist())
                     frequency = st.selectbox("Select data frequency", ["1min", "5min", "15min", "30min", "1H", "2H", "4H", "6H", "8H", "12H", "1D"], index=4)
 
-                    df = load_and_parse(training_file.name, datetime_col=datetime_col)
+                    df = load_and_parse(training_file, datetime_col=datetime_col)
                     df = enforce_frequency(df, freq=frequency)
                     sanity_checks(df)
                     st.success("File loaded and preprocessed successfully!")
@@ -98,7 +95,14 @@ def main():
                     st.session_state['model_params'] = {'n_estimators': n_estimators, 'learning_rate': learning_rate, 'max_depth': max_depth, 'min_child_weight': min_child_weight, 'subsample': subsample, 'colsample_bytree': colsample_bytree}
 
                     if st.button("Train New Model"):
-                        metrics = train_model(training_file.name, models_dir, target_column=target_col, model_params=st.session_state.get('model_params'), test_size=test_size)
+                        metrics = train_model(
+                            training_file, 
+                            models_dir, 
+                            target_column=target_col, 
+                            datetime_col=datetime_col,
+                            model_params=st.session_state.get('model_params'), 
+                            test_size=test_size
+                        )
                         st.session_state['new_model_metrics'] = metrics
                         st.session_state['new_model_trained'] = True
                         model, scaler, feature_names = load_latest_model_files(models_dir)
@@ -111,9 +115,6 @@ def main():
 
                 except Exception as e:
                     st.error(f"Error processing file: {e}")
-                finally:
-                    if os.path.exists(training_file.name):
-                        os.remove(training_file.name)
 
         model, scaler, feature_names, training_data, status = load_selected_model_components(model_option, models_dir)
         st.sidebar.write(status)

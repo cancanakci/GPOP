@@ -33,9 +33,6 @@ def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None,
         
         st.info(f"Warning Summary: {red_warning_rows} rows have red warnings, {yellow_warning_rows} rows have yellow warnings out of {total_rows} total rows.")
 
-    if yellow_warnings or red_warnings:
-        st.warning("⚠️ Current predictions are **UNRELIABLE**, see warnings.")
-
 def display_data_visualizations(training_data, model=None):
     """Display various visualizations for the training data."""
     if training_data is None:

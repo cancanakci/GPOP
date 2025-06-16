@@ -7,30 +7,35 @@ Functions for loading, cleaning, and preparing time-series data for modeling.
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, IO
 
 # ----------------------------------------------------------------------
 # 1. I/O helpers
 # ----------------------------------------------------------------------
 def load_and_parse(
-    file_path: Union[str, Path],
+    file_source: Union[str, Path, IO[bytes]],
     datetime_col: str,
     drop_duplicates: bool = True,
 ) -> pd.DataFrame:
     """
-    - Reads CSV/Parquet/Feather/Excel into pandas.
+    - Reads CSV/Parquet/Feather/Excel into pandas from a path or file-like object.
     - Parses the datetime column and sets it as a timezone-naive index.
     - Sorts chronologically.
     """
-    path = Path(file_path)
-    if path.suffix.lower() in {".parquet", ".pq"}:
-        df = pd.read_parquet(path)
-    elif path.suffix.lower() in {".feather", ".ft"}:
-        df = pd.read_feather(path)
-    elif path.suffix.lower() in {".xlsx", ".xls"}:
-        df = pd.read_excel(path)
-    else:
-        df = pd.read_csv(path)
+    file_name = ""
+    if hasattr(file_source, 'name'):
+        file_name = file_source.name.lower()
+    elif isinstance(file_source, (str, Path)):
+        file_name = str(file_source).lower()
+
+    if file_name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(file_source)
+    elif file_name.endswith((".parquet", ".pq")):
+        df = pd.read_parquet(file_source)
+    elif file_name.endswith((".feather", ".ft")):
+        df = pd.read_feather(file_source)
+    else: # Default to CSV
+        df = pd.read_csv(file_source)
 
     df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
     if df[datetime_col].isna().any():
