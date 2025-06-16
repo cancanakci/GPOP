@@ -209,7 +209,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     fig.update_layout(
         title=f'Feature Trends and {target_col} Prediction',
         height=400 + 200 * n_features,
-        showlegend=True,
+        showlegend=False,
         hovermode='x unified'
     )
     fig.update_yaxes(title_text=target_col, row=1, col=1)

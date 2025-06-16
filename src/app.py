@@ -265,8 +265,8 @@ def main():
                     else:
                         plot_target = scenario_data[target_col]
                         plot_adjusted = adjusted_series
-                    fig_well.add_trace(go.Scatter(x=plot_target.index, y=plot_target.values, name='Original Predictions', mode='lines'))
                     fig_well.add_trace(go.Scatter(x=plot_adjusted.index, y=plot_adjusted.values, name='Adjusted with New Wells', mode='lines'))
+                    fig_well.add_trace(go.Scatter(x=plot_target.index, y=plot_target.values, name='Original Predictions', mode='lines'))
                     for pulse_time in pulses:
                         fig_well.add_vline(x=pulse_time, line_color="red")
                     fig_well.update_layout(title='Power Predictions with New Wells', xaxis_title='Date', yaxis_title=target_col, hovermode='x unified')
@@ -301,16 +301,16 @@ def main():
                         plot_adjusted_features = adjusted_future_features
                     
                     fig_brine = go.Figure()
-                    fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[brine_col], name=f'Original {brine_col}', mode='lines', line=dict(color='blue')))
                     fig_brine.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[brine_col], name=f'Adjusted {brine_col}', mode='lines', line=dict(color='orange')))
+                    fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[brine_col], name=f'Original {brine_col}', mode='lines', line=dict(color='blue')))
                     for pulse_time in pulses:
                         fig_brine.add_vline(x=pulse_time, line_color="red")
                     fig_brine.update_layout(title=f'{brine_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
                     st.plotly_chart(fig_brine, use_container_width=True)
 
                     fig_ncg = go.Figure()
-                    fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[steam_col], name=f'Original {steam_col}', mode='lines', line=dict(color='green')))
                     fig_ncg.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[steam_col], name=f'Adjusted {steam_col}', mode='lines', line=dict(color='purple')))
+                    fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[steam_col], name=f'Original {steam_col}', mode='lines', line=dict(color='green')))
                     for pulse_time in pulses:
                         fig_ncg.add_vline(x=pulse_time, line_color="red")
                     fig_ncg.update_layout(title=f'{steam_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
