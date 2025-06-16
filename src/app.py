@@ -716,7 +716,7 @@ def main():
 
         if model_option == "Train New Model":
             st.write("Upload your data to train a new model.")
-            training_file = st.file_uploader("Upload training data (CSV or Parquet)", type=['csv', 'parquet', 'pq'], key="training_file")
+            training_file = st.file_uploader("Upload training data (CSV or Excel)", type=['csv', 'xlsx'], key="training_file")
 
             if training_file is not None:
                 try:
@@ -728,7 +728,11 @@ def main():
                     st.subheader("Time Series Settings for Training Data")
                     
                     # Let user pick datetime column
-                    temp_df = pd.read_csv(training_file.name, nrows=0) # Read only headers
+                    if training_file.name.lower().endswith('.csv'):
+                        temp_df = pd.read_csv(training_file.name, nrows=0) # Read only headers
+                    else:
+                        temp_df = pd.read_excel(training_file.name, nrows=0) # Read only headers
+                    
                     datetime_col = st.selectbox(
                         "Select your datetime column",
                         temp_df.columns.tolist()
@@ -767,13 +771,32 @@ def main():
                     st.write("Basic Statistics:")
                     st.dataframe(df.describe())
 
-                    # User picks target
-                    st.subheader("Target Column Selection")
+                    # User picks target and flowrate columns
+                    st.subheader("Column Mapping for Model Training & Simulation")
+                    all_cols = df.columns.tolist()
+                    
                     target_col = st.selectbox(
-                        "Select Target Column",
-                        df.columns.tolist(),
-                        index=len(df.columns) - 1,
+                        "Select Target Column (e.g., Gross Power)",
+                        all_cols,
+                        index=len(all_cols) - 1,
                         key="train_target_col"
+                    )
+
+                    # Let user map brine and steam flowrate columns for the simulation
+                    st.write("Select the columns that represent your primary brine and steam flowrates. This is used for the new well simulation.")
+                    
+                    available_cols = [col for col in all_cols if col != target_col]
+                    
+                    brine_col = st.selectbox(
+                        "Select Primary Brine Flowrate Column",
+                        available_cols,
+                        key="train_brine_col"
+                    )
+                    
+                    steam_col = st.selectbox(
+                        "Select Primary Steam Flowrate Column",
+                        [col for col in available_cols if col != brine_col],
+                        key="train_steam_col"
                     )
 
                     # Outlier detection on numeric features (excluding target)
@@ -790,7 +813,9 @@ def main():
                         'y_train': df[target_col],
                         'y_test': df[target_col].iloc[:len(df)//5],
                         'feature_names': df.drop(target_col, axis=1).columns.tolist(),
-                        'target_column': target_col
+                        'target_column': target_col,
+                        'brine_col': brine_col,
+                        'steam_col': steam_col
                     }
 
                     # Add hyperparameter tuning section
@@ -922,6 +947,8 @@ def main():
                     model, scaler, feature_names = load_default_model("models")
                     # Get target column from default model's training data
                     target_col = joblib.load(os.path.join("models", "default_training_data.pkl")).get('target_column', default_data.columns[-1])
+                    brine_col = "Brine Flowrate (T/h)"
+                    steam_col = "NCG+Steam Flowrate (T/h)"
                     ts_data = default_data
                 else:
                     # For new model, use the latest training data and model
@@ -931,6 +958,8 @@ def main():
                     scaler = st.session_state.get('new_model_scaler')
                     feature_names = st.session_state.get('new_model_feature_names')
                     target_col = training_data['target_column']
+                    brine_col = training_data.get('brine_col')
+                    steam_col = training_data.get('steam_col')
 
                 st.write("Training Data Preview:")
                 st.dataframe(ts_data.head())
@@ -945,8 +974,8 @@ def main():
 
                     # --- Default trend settings ---
                     default_trends = {
-                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0, "seasonality": True},
-                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0, "seasonality": True},
+                        brine_col: {"type": "Exponential", "value": -3.0, "seasonality": True},
+                        steam_col: {"type": "Exponential", "value": -3.0, "seasonality": True},
                         "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0, "seasonality": True},
                         "Heat Exchanger Pressure Differential (Bar)": {"type": "Constant", "value": 0.0, "seasonality": False},
                     }
@@ -1110,6 +1139,8 @@ def main():
                                 threshold,
                                 muw_flowrate,
                                 steam_percentage,
+                                brine_col,
+                                steam_col,
                                 feature_trends
                             ):
                                 """
@@ -1150,7 +1181,7 @@ def main():
                                             years_from_drill = (affected_dates - drilling_date).days / 365.25
 
                                             # --- Calculate decaying lift for Brine ---
-                                            brine_trend = feature_trends.get("Brine Flowrate (T/h)", {'type': 'constant'})
+                                            brine_trend = feature_trends.get(brine_col, {'type': 'constant'})
                                             brine_initial_lift = pd.Series(delta_brine, index=affected_dates)
                                             
                                             if brine_trend['type'] == 'exponential':
@@ -1167,7 +1198,7 @@ def main():
                                             brine_decayed_lift = brine_decayed_lift.clip(lower=0)
                                             
                                             # --- Calculate decaying lift for NCG+Steam ---
-                                            ncg_trend = feature_trends.get("NCG+Steam Flowrate (T/h)", {'type': 'constant'})
+                                            ncg_trend = feature_trends.get(steam_col, {'type': 'constant'})
                                             ncg_initial_lift = pd.Series(delta_ncg, index=affected_dates)
                                             
                                             if ncg_trend['type'] == 'exponential':
@@ -1182,9 +1213,10 @@ def main():
                                             ncg_decayed_lift = ncg_decayed_lift.clip(lower=0)
 
                                             # Add the decaying lifts
-                                            adjusted_features.loc[future_mask, "Brine Flowrate (T/h)"] += brine_decayed_lift
-                                            adjusted_features.loc[future_mask, "NCG+Steam Flowrate (T/h)"] += ncg_decayed_lift
+                                            adjusted_features.loc[future_mask, brine_col] += brine_decayed_lift
+                                            adjusted_features.loc[future_mask, steam_col] += ncg_decayed_lift
 
+                                            # With the features adjusted, re-predict the power output for all future dates.
                                             X_scaled = scaler.transform(adjusted_features[feature_names])
                                             new_predictions = model.predict(X_scaled)
                                             adjusted_power = pd.Series(new_predictions, index=adjusted_features.index)
@@ -1207,6 +1239,8 @@ def main():
                                 threshold,
                                 muw_flowrate,
                                 steam_percentage,
+                                brine_col,
+                                steam_col,
                                 feature_trends
                             )
                             progress_placeholder.progress(1.0, text="Simulation complete!")
@@ -1366,8 +1400,8 @@ def main():
 
                             # Plot for Brine Flowrate
                             fig_brine = go.Figure()
-                            fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features["Brine Flowrate (T/h)"], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
-                            fig_brine.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features["Brine Flowrate (T/h)"], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
+                            fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[brine_col], name='Original Brine Flowrate', mode='lines', line=dict(color='blue')))
+                            fig_brine.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[brine_col], name='Adjusted Brine Flowrate', mode='lines', line=dict(color='orange')))
                             for pulse_time in pulses:
                                 fig_brine.add_vline(x=pulse_time, line_color="red")
                             fig_brine.update_layout(title='Brine Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
@@ -1375,8 +1409,8 @@ def main():
 
                             # Plot for NCG+Steam Flowrate
                             fig_ncg = go.Figure()
-                            fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features["NCG+Steam Flowrate (T/h)"], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
-                            fig_ncg.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features["NCG+Steam Flowrate (T/h)"], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
+                            fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[steam_col], name='Original NCG+Steam Flowrate', mode='lines', line=dict(color='green')))
+                            fig_ncg.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[steam_col], name='Adjusted NCG+Steam Flowrate', mode='lines', line=dict(color='purple')))
                             for pulse_time in pulses:
                                 fig_ncg.add_vline(x=pulse_time, line_color="red")
                             fig_ncg.update_layout(title='NCG+Steam Flowrate with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
