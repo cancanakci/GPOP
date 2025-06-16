@@ -532,16 +532,16 @@ def create_scenario_dataframe(historical_df, years, feature_trends):
         future_values = np.full(periods, last_value, dtype=np.float64)
 
         # Apply user-defined trend modifications if specified
-        if trend_mod['type'] in ['linear', 'exponential', 'polynomial']:
+        if trend_mod['type'].lower() in ['linear', 'exponential', 'polynomial']:
             time_factor = np.linspace(0, years, periods)  # Time in years from start
 
-            if trend_mod['type'] == 'linear':
+            if trend_mod['type'].lower() == 'linear':
                 # Absolute change per year
                 future_values += time_factor * trend_mod['params']['slope']
-            elif trend_mod['type'] == 'exponential':
+            elif trend_mod['type'].lower() == 'exponential':
                 # Percentage change per year
                 future_values *= (1 + trend_mod['params']['growth_rate']) ** time_factor
-            elif trend_mod['type'] == 'polynomial':
+            elif trend_mod['type'].lower() == 'polynomial':
                 # Additive polynomial trend
                 poly_trend = np.polyval(trend_mod['params']['coefficients'][::-1], time_factor)
                 future_values += poly_trend
