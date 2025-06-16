@@ -3,7 +3,7 @@ from sklearn.model_selection import train_test_split, KFold, cross_val_score, Gr
 from sklearn.metrics import mean_squared_error, r2_score, make_scorer
 from sklearn.preprocessing import StandardScaler
 import joblib
-from data_prep import load_data, preprocess_data
+from data_processing import load_and_parse
 import os
 import numpy as np
 import xgboost as xgb
@@ -31,11 +31,12 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
         metrics_path = os.path.join(models_dir, f"metrics_{timestamp}.json")
         training_data_path = os.path.join(models_dir, f"training_data_{timestamp}.pkl")
     
-    # Load data - data_path can be either a file path or a file object
-    df = load_data(data_path)
+    # Load data using the corrected function from data_processing
+    df = load_and_parse(data_path)
 
     # --- Preprocessing (Interpolation) ---
-    df_processed = preprocess_data(df)
+    # Replicate the simple interpolation from the old preprocess_data function
+    df_processed = df.interpolate(method='time').bfill()
     
     # If target_column is not specified, use the last column
     if target_column is None:
