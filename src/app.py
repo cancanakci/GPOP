@@ -608,7 +608,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
             if trend['type'] == 'linear':
                 st.write(f"- {feature}: Linear ({trend['params']['slope']*100:.2f} per year)")
             elif trend['type'] == 'exponential':
-                st.write(f"- {feature}: Exponential ({trend['params']['growth_rate']*100:.2f}% per year)")
+                st.write(f"- {feature}: Exponential ({['growth_rate']*100:.2f}% per year)")
             elif trend['type'] == 'polynomial':
                 st.write(f"- {feature}: Polynomial (coefficients: {trend['params']['coefficients']})")
             else:
@@ -929,12 +929,12 @@ def main():
 
                     # --- Default trend settings ---
                     default_trends = {
-                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
-                        "Fluid Temperature (°C)": {"type": "Linear", "value": -1.0},
-                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
+                        "Brine Flowrate (T/hour)": {"type": "Exponential", "value": -3.0},
+                        "Fluid Temperature (°C)": {"type": "Constant", "value": 0.0},
+                        "NCG+Steam Flowrate (T/hour)": {"type": "Exponential", "value": -3.0},
                         "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0},
                         "Heat Exchanger Pressure Differential (Bar)": {"type": "Constant", "value": 0.0},
-                        "Reinjection Temperature (°C)": {"type": "Linear", "value": 0.4}
+                        "Reinjection Temperature (°C)": {"type": "Constant", "value": 0.0}
                     }
 
                     feature_trends = {}
