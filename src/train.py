@@ -117,7 +117,7 @@ def train_model(data_path, models_dir, target_column=None, n_splits=5, is_defaul
     cv_params.pop('early_stopping_rounds', None)
     cv_model = xgb.XGBRegressor(**cv_params)
 
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=12345)
     cv_r2_scores = cross_val_score(cv_model, X_train_scaled, y_train, cv=kf, scoring='r2')
     cv_mse_scores = -cross_val_score(cv_model, X_train_scaled, y_train, cv=kf, scoring='neg_mean_squared_error')
     cv_rmse_scores = np.sqrt(cv_mse_scores)

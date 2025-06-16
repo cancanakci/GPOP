@@ -19,6 +19,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
 from statsmodels.tsa.seasonal import seasonal_decompose
+from timeseries_cleaning_pipeline import (
+    load_and_parse,
+    enforce_frequency,
+    sanity_checks,
+    detect_and_impute_outliers
+)
 
 def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
@@ -500,89 +506,62 @@ def display_model_metrics(metrics):
 
 def create_scenario_dataframe(historical_df, years, feature_trends):
     """
-    Creates a scenario dataframe by extrapolating historical data based on seasonality and trends.
-    It uses time-series decomposition to separate trend, seasonality, and residuals.
+    Creates a scenario dataframe.
+    - "Freeze": Projects the last known value forward (flat line).
+    - "Constant": Projects the last known value forward and adds historical seasonality.
+    - Other trends (Linear, Exp): Applies the trend to the last value and adds seasonality.
     """
     freq = historical_df.index.freq
     if freq is None:
-        # If frequency is not set, infer it
         freq = pd.infer_freq(historical_df.index)
 
-    # Create a precise future index using DateOffset, which correctly handles leap years
     future_start = historical_df.index[-1] + freq
     future_end = future_start + pd.DateOffset(years=years) - freq
     future_dates = pd.date_range(start=future_start, end=future_end, freq=freq)
     periods = len(future_dates)
 
-    # Create a future dataframe with the precise index
     future_df = pd.DataFrame(index=future_dates)
-
+    
     # Estimate periods per year for seasonality decomposition (this can be an approximation)
-    periods_per_year = int(pd.Timedelta(days=365.25) / pd.to_timedelta(freq))
+    periods_per_year = int(pd.Timedelta(days=365.25) / pd.to_timedelta(freq)) if freq else 365
 
     for feature in historical_df.columns:
-        # Decompose the time series
-        # Ensure there are enough periods for decomposition (at least 2 full cycles)
-        seasonal_periods = periods_per_year
-        if len(historical_df[feature]) > 2 * seasonal_periods:
-            decomposition = seasonal_decompose(historical_df[feature], model='additive', period=seasonal_periods)
-            
-            # Extrapolate Trend
-            trend_series = decomposition.trend.dropna()
-            x = np.arange(len(trend_series))
-            future_x = np.arange(len(trend_series), len(trend_series) + periods)
-            
-            # Fit a line to the historical trend to project it forward
-            trend_fit = np.polyfit(x, trend_series, 1)
-            future_trend_values = np.polyval(trend_fit, future_x)
-            
-            # Apply user-defined modifications on top of the extrapolated base trend
-            if feature in feature_trends:
-                trend_mod = feature_trends[feature]
-                time_factor = np.linspace(0, years, periods)
-                
-                if trend_mod['type'] == 'linear':
-                    future_trend_values += time_factor * trend_mod['params']['slope'] * trend_series.mean()
-                elif trend_mod['type'] == 'exponential':
-                    future_trend_values *= (1 + trend_mod['params']['growth_rate']) ** time_factor
-
-            # Extrapolate Seasonality by tiling
-            seasonal_values = decomposition.seasonal.iloc[-seasonal_periods:]
-            future_seasonal_values = np.tile(seasonal_values, int(np.ceil(periods / seasonal_periods)))[:periods]
-
-            # Extrapolate Residuals by random sampling
-            residuals = decomposition.resid.dropna()
-            future_residuals = np.random.choice(residuals, size=periods, replace=True)
-
-            # Combine components
-            future_df[feature] = future_trend_values + future_seasonal_values + future_residuals
+        # Get trend settings, default to 'Constant'
+        trend_mod = feature_trends.get(feature, {'type': 'Constant'})
         
-        else:
-            # Fallback for short series: repeat the last year with a simple trend
-            last_year_data = historical_df[feature].iloc[-periods_per_year:]
+        # Start with the last known value as a constant baseline
+        last_value = historical_df[feature].iloc[-1]
+        future_values = np.full(periods, last_value, dtype=np.float64)
 
-            if len(last_year_data) == 0:
-                future_df[feature] = 0
-                continue
+        # Apply user-defined trend modifications if specified
+        if trend_mod['type'] in ['linear', 'exponential', 'polynomial']:
+            time_factor = np.linspace(0, years, periods)  # Time in years from start
 
-            # Use the actual length of the sliced data to calculate the number of repetitions
-            num_repeats = int(np.ceil(periods / len(last_year_data)))
-            base_pattern = np.tile(last_year_data.values, num_repeats)[:periods]
+            if trend_mod['type'] == 'linear':
+                # Absolute change per year
+                future_values += time_factor * trend_mod['params']['slope']
+            elif trend_mod['type'] == 'exponential':
+                # Percentage change per year
+                future_values *= (1 + trend_mod['params']['growth_rate']) ** time_factor
+            elif trend_mod['type'] == 'polynomial':
+                # Additive polynomial trend
+                poly_trend = np.polyval(trend_mod['params']['coefficients'][::-1], time_factor)
+                future_values += poly_trend
+        
+        # Add seasonality, unless the trend is 'Freeze'
+        if trend_mod['type'] != 'Freeze':
+            seasonal_periods = periods_per_year
+            if len(historical_df[feature]) > 2 * seasonal_periods:
+                decomposition = seasonal_decompose(historical_df[feature], model='additive', period=seasonal_periods)
+                
+                # Extrapolate Seasonality by tiling
+                seasonal_values = decomposition.seasonal.iloc[-seasonal_periods:]
+                future_seasonal_values = np.tile(seasonal_values, int(np.ceil(periods / seasonal_periods)))[:periods]
+                future_values += future_seasonal_values
+            else:
+                st.warning(f"Not enough data for feature '{feature}' to determine seasonality. Projecting without seasonality.")
 
-            future_values = base_pattern.copy().astype(float)
-
-            if feature in feature_trends:
-                trend_mod = feature_trends[feature]
-                time_factor = np.linspace(0, years, periods)
-
-                if trend_mod['type'] == 'linear':
-                    trend_effect = time_factor * trend_mod['params']['slope']
-                    future_values += trend_effect * np.mean(base_pattern)
-                elif trend_mod['type'] == 'exponential':
-                    trend_effect = (1 + trend_mod['params']['growth_rate']) ** time_factor
-                    future_values *= trend_effect
-            
-            future_df[feature] = future_values
+        future_df[feature] = future_values
 
     # Combine historical and future data
     scenario_df = pd.concat([historical_df, future_df])
@@ -608,7 +587,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
             if trend['type'] == 'linear':
                 st.write(f"- {feature}: Linear ({trend['params']['slope']*100:.2f} per year)")
             elif trend['type'] == 'exponential':
-                st.write(f"- {feature}: Exponential ({['growth_rate']*100:.2f}% per year)")
+                st.write(f"- {feature}: Exponential ({trend['params']['growth_rate']*100:.2f}% per year)")
             elif trend['type'] == 'polynomial':
                 st.write(f"- {feature}: Polynomial (coefficients: {trend['params']['coefficients']})")
             else:
@@ -739,13 +718,41 @@ def main():
 
         if model_option == "Train New Model":
             st.write("Upload your data to train a new model.")
-            training_file = st.file_uploader("Upload training data (CSV or Excel)", type=['csv', 'xlsx'], key="training_file")
+            training_file = st.file_uploader("Upload training data (CSV or Parquet)", type=['csv', 'parquet', 'pq'], key="training_file")
 
             if training_file is not None:
                 try:
-                    df = load_data(training_file)
-                    st.success("File loaded successfully!")
+                    # Use a temporary path for the uploaded file
+                    with open(training_file.name, "wb") as f:
+                        f.write(training_file.getbuffer())
+                    
+                    # --- New Cleaning Pipeline Integration ---
+                    st.subheader("Time Series Settings for Training Data")
+                    
+                    # Let user pick datetime column
+                    temp_df = pd.read_csv(training_file.name, nrows=0) # Read only headers
+                    datetime_col = st.selectbox(
+                        "Select your datetime column",
+                        temp_df.columns.tolist()
+                    )
+                    
+                    # Let user pick frequency
+                    frequency = st.selectbox(
+                        "Select data frequency",
+                        ["1min", "5min", "15min", "30min", "1H", "2H", "4H", "6H", "8H", "12H", "1D"],
+                        index=4,
+                        key="train_frequency"
+                    )
 
+                    # Load and clean data using the new pipeline
+                    df = load_and_parse(training_file.name, datetime_col=datetime_col)
+                    df = enforce_frequency(df, freq=frequency)
+                    sanity_checks(df)
+                    
+                    st.success("File loaded and preprocessed successfully!")
+                    
+                    # --- End of New Cleaning Pipeline Integration ---
+                    
                     st.write("Data Preview:")
                     st.dataframe(df.head())
 
@@ -762,24 +769,22 @@ def main():
                     st.write("Basic Statistics:")
                     st.dataframe(df.describe())
 
-                    # User picks target, start date, frequency
-                    st.subheader("Time Series Settings for Training Data")
+                    # User picks target
+                    st.subheader("Target Column Selection")
                     target_col = st.selectbox(
                         "Select Target Column",
                         df.columns.tolist(),
-                        index=len(df.columns) - 1,  # Default to last column
+                        index=len(df.columns) - 1,
                         key="train_target_col"
                     )
-                    start_date = st.date_input("Start Date", value=datetime.now().date(), key="train_start_date")
-                    frequency = st.selectbox(
-                        "Measurement Frequency",
-                        ["1min", "5min", "15min", "30min", "1H", "2H", "4H", "6H", "8H", "12H", "1D"],
-                        index=4,
-                        key="train_frequency"
-                    )
-                    n_samples = len(df)
-                    date_range = pd.date_range(start=start_date, periods=n_samples, freq=frequency)
-                    df.index = date_range
+
+                    # Outlier detection on numeric features (excluding target)
+                    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+                    if target_col in numeric_cols:
+                        numeric_cols.remove(target_col)
+                    
+                    df = detect_and_impute_outliers(df, cols=numeric_cols)
+                    st.info("Outlier detection and imputation complete.")
 
                     training_data_for_viz = {
                         'X_train': df.drop(target_col, axis=1),
@@ -853,7 +858,11 @@ def main():
                         except Exception as e:
                             st.error(f"Error training model: {str(e)}")
                 except Exception as e:
-                    st.error(f"Error loading file: {str(e)}")
+                    st.error(f"Error processing file: {str(e)}")
+                finally:
+                    # Clean up the temporary file
+                    if os.path.exists(training_file.name):
+                        os.remove(training_file.name)
             else:
                 st.info("Please upload a training data file to train a new model.")
 
@@ -898,11 +907,13 @@ def main():
             # Use the loaded training_data and model for time series
             try:
                 if model_option == "Use Default Model":
-                    # For default model, load default data and model
-                    default_data = pd.read_excel("data/default_data.xlsx")
-                    start_datetime = pd.Timestamp("2023-01-01 20:00")
-                    freq = '1H'
-                    default_data.index = pd.date_range(start=start_datetime, periods=len(default_data), freq=freq)
+                    # For default model, load default data and model using the new pipeline
+                    peek_df = pd.read_excel("data/default_data.xlsx", nrows=0)
+                    datetime_col = peek_df.columns[0]
+                    default_data = load_and_parse("data/default_data.xlsx", datetime_col=datetime_col)
+                    default_data = enforce_frequency(default_data, freq='H')
+                    sanity_checks(default_data)
+                    
                     model, scaler, feature_names = load_default_model("models")
                     # Get target column from default model's training data
                     target_col = joblib.load(os.path.join("models", "default_training_data.pkl")).get('target_column', default_data.columns[-1])
@@ -929,12 +940,9 @@ def main():
 
                     # --- Default trend settings ---
                     default_trends = {
-                        "Brine Flowrate (T/hour)": {"type": "Exponential", "value": -3.0},
-                        "Fluid Temperature (°C)": {"type": "Constant", "value": 0.0},
-                        "NCG+Steam Flowrate (T/hour)": {"type": "Exponential", "value": -3.0},
+                        "Brine Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
+                        "NCG+Steam Flowrate (T/h)": {"type": "Exponential", "value": -3.0},
                         "Ambient Temperature (°C)": {"type": "Linear", "value": 1.0},
-                        "Heat Exchanger Pressure Differential (Bar)": {"type": "Constant", "value": 0.0},
-                        "Reinjection Temperature (°C)": {"type": "Constant", "value": 0.0}
                     }
 
                     feature_trends = {}
@@ -943,8 +951,8 @@ def main():
 
                         # Get default settings for the current feature
                         defaults = default_trends.get(feature, {"type": "Constant", "value": 0.0})
-                        trend_options = ["Constant", "Linear", "Exponential", "Polynomial"]
-                        default_index = trend_options.index(defaults["type"])
+                        trend_options = ["Freeze", "Constant", "Linear", "Exponential", "Polynomial"]
+                        default_index = trend_options.index(defaults["type"]) if defaults["type"] in trend_options else 1 # Default to 'Constant'
 
                         trend_type = st.selectbox(
                             "Select Trend Type",
@@ -953,48 +961,50 @@ def main():
                             key=f"trend_{feature}"
                         )
 
-                        if trend_type != "Constant":
-                            if trend_type == "Linear":
-                                slope = st.number_input(
-                                    f"Annual change for {feature}",
-                                    value=defaults["value"] if defaults["type"] == "Linear" else 0.0,
+                        if trend_type == "Freeze":
+                            feature_trends[feature] = {'type': 'Freeze'}
+                        
+                        if trend_type == "Linear":
+                            slope = st.number_input(
+                                f"Annual change for {feature}",
+                                value=defaults["value"] if defaults["type"] == "Linear" else 0.0,
+                                format="%.2f",
+                                key=f"slope_{feature}"
+                            )
+                            feature_trends[feature] = {
+                                'type': 'linear',
+                                'params': {'slope': slope}
+                            }
+                        elif trend_type == "Exponential":
+                            growth_rate = st.number_input(
+                                f"Annual growth rate for {feature} (%)",
+                                value=defaults["value"] if defaults["type"] == "Exponential" else 0.0,
+                                format="%.2f",
+                                key=f"growth_{feature}"
+                            )
+                            feature_trends[feature] = {
+                                'type': 'exponential',
+                                'params': {'growth_rate': growth_rate / 100}
+                            }
+                        elif trend_type == "Polynomial":
+                            degree = st.slider(
+                                f"Polynomial degree for {feature}",
+                                1, 5,
+                                key=f"degree_{feature}"
+                            )
+                            coefficients = []
+                            for i in range(degree + 1):
+                                coef = st.number_input(
+                                    f"Coefficient for x^{i}",
+                                    value=0.0,
                                     format="%.2f",
-                                    key=f"slope_{feature}"
+                                    key=f"coef_{feature}_{i}"
                                 )
-                                feature_trends[feature] = {
-                                    'type': 'linear',
-                                    'params': {'slope': slope / 100}
-                                }
-                            elif trend_type == "Exponential":
-                                growth_rate = st.number_input(
-                                    f"Annual growth rate for {feature} (%)",
-                                    value=defaults["value"] if defaults["type"] == "Exponential" else 0.0,
-                                    format="%.2f",
-                                    key=f"growth_{feature}"
-                                )
-                                feature_trends[feature] = {
-                                    'type': 'exponential',
-                                    'params': {'growth_rate': growth_rate / 100}
-                                }
-                            elif trend_type == "Polynomial":
-                                degree = st.slider(
-                                    f"Polynomial degree for {feature}",
-                                    2, 5,
-                                    key=f"degree_{feature}"
-                                )
-                                coefficients = []
-                                for i in range(degree):
-                                    coef = st.number_input(
-                                        f"Coefficient for x^{i}",
-                                        value=0.0,
-                                        format="%.2f",
-                                        key=f"coef_{feature}_{i}"
-                                    )
-                                    coefficients.append(coef)
-                                feature_trends[feature] = {
-                                    'type': 'polynomial',
-                                    'params': {'coefficients': coefficients}
-                                }
+                                coefficients.append(coef)
+                            feature_trends[feature] = {
+                                'type': 'polynomial',
+                                'params': {'coefficients': coefficients}
+                            }
 
                     if st.button("Generate Scenario"):
                         # Create scenario dataframe with extrapolated features (exclude target)
@@ -1061,7 +1071,7 @@ def main():
                         threshold = st.number_input(
                             "Yearly average power threshold for drilling a new well (MW)",
                             min_value=0,
-                            value=35,
+                            value=40,
                             step=1,
                             key="well_threshold"
                         )
@@ -1109,8 +1119,8 @@ def main():
                                 delta_brine = muw_flowrate * (1 - (steam_percentage / 100.0))
 
                                 year_starts = pd.date_range(
-                                    start=adjusted_power.index.min().to_period('Y').to_timestamp(),
-                                    end=adjusted_power.index.max().to_period('Y').to_timestamp(),
+                                    start=adjusted_power.index.min(),
+                                    end=adjusted_power.index.max(),
                                     freq='YS'
                                 )
 
@@ -1137,11 +1147,14 @@ def main():
                                             brine_initial_lift = pd.Series(delta_brine, index=affected_dates)
                                             
                                             if brine_trend['type'] == 'exponential':
-                                                brine_decayed_lift = brine_initial_lift * ((1 + brine_trend['params']['growth_rate']) ** years_from_drill)
+                                                growth_rate = brine_trend['params']['growth_rate']
+                                                brine_decayed_lift = brine_initial_lift * ((1 + growth_rate) ** years_from_drill)
                                             elif brine_trend['type'] == 'linear':
-                                                yearly_decay_amount = delta_brine * brine_trend['params']['slope']
-                                                total_decay = yearly_decay_amount * years_from_drill
-                                                brine_decayed_lift = brine_initial_lift + total_decay
+                                                # The slope is the absolute change per year.
+                                                slope = brine_trend['params']['slope']
+                                                # The lift from the well also decays by the same absolute amount.
+                                                total_change = slope * years_from_drill
+                                                brine_decayed_lift = brine_initial_lift + total_change
                                             else: # Constant
                                                 brine_decayed_lift = brine_initial_lift
                                             brine_decayed_lift = brine_decayed_lift.clip(lower=0)
@@ -1151,11 +1164,12 @@ def main():
                                             ncg_initial_lift = pd.Series(delta_ncg, index=affected_dates)
                                             
                                             if ncg_trend['type'] == 'exponential':
-                                                ncg_decayed_lift = ncg_initial_lift * ((1 + ncg_trend['params']['growth_rate']) ** years_from_drill)
+                                                growth_rate = ncg_trend['params']['growth_rate']
+                                                ncg_decayed_lift = ncg_initial_lift * ((1 + growth_rate) ** years_from_drill)
                                             elif ncg_trend['type'] == 'linear':
-                                                yearly_decay_amount = delta_ncg * ncg_trend['params']['slope']
-                                                total_decay = yearly_decay_amount * years_from_drill
-                                                ncg_decayed_lift = ncg_initial_lift + total_decay
+                                                slope = ncg_trend['params']['slope']
+                                                total_change = slope * years_from_drill
+                                                ncg_decayed_lift = ncg_initial_lift + total_change
                                             else: # Constant
                                                 ncg_decayed_lift = ncg_initial_lift
                                             ncg_decayed_lift = ncg_decayed_lift.clip(lower=0)
