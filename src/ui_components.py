@@ -9,7 +9,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
-import numpy as np
 
 def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
@@ -34,61 +33,62 @@ def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None,
         
         st.info(f"Warning Summary: {red_warning_rows} rows have red warnings, {yellow_warning_rows} rows have yellow warnings out of {total_rows} total rows.")
 
-def display_data_visualizations(training_data, model):
-    """
-    Displays various visualizations for model exploration, including feature importance
-    and time series plots of the training data.
-    """
-    st.subheader("Feature Importance")
-    if hasattr(model, 'feature_importances_'):
+def display_data_visualizations(training_data, model=None):
+    """Display various visualizations for the training data."""
+    if training_data is None:
+        return
+    
+    X_train = training_data['X_train']
+    X_test = training_data['X_test']
+    y_train = training_data['y_train']
+    y_test = training_data['y_test']
+    feature_names = training_data['feature_names']
+    target_column = training_data.get('target_column', 'Target')
+    
+    X_combined = pd.concat([X_train, X_test])
+    y_combined = pd.concat([y_train, y_test])
+    
+    df_combined = X_combined.copy()
+    df_combined[target_column] = y_combined.values
+    
+    st.subheader("Training Data")
+    
+    if model is not None and hasattr(model, 'feature_importances_'):
         importances = model.feature_importances_
-        feature_names = training_data.get('feature_names', [])
-        if feature_names:
-            importance_df = pd.DataFrame({'feature': feature_names, 'importance': importances})
-            importance_df = importance_df.sort_values(by='importance', ascending=False)
-            
-            fig = px.bar(importance_df, x='importance', y='feature', orientation='h', title='Model Feature Importance')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("Feature names not available in training data.")
-    else:
-        st.info("This model type does not expose feature importances.")
+        feature_importance_df = pd.DataFrame({
+            'Feature': feature_names,
+            'Importance': importances
+        }).sort_values('Importance', ascending=False)
 
-    st.subheader("Training Data Time Series")
-    try:
-        # Reconstruct the full dataset from train/test splits to plot
-        X_train = training_data['X_train']
-        y_train = training_data['y_train']
-        X_test = training_data['X_test']
-        y_test = training_data['y_test']
-
-        # Combine, sort, and assign markers for plotting
-        y_full = pd.concat([y_train, y_test]).sort_index()
-        X_full = pd.concat([X_train, X_test]).sort_index()
+        fig = px.bar(feature_importance_df, 
+                   x='Feature', 
+                   y='Importance',
+                   title='Feature Importance',
+                   labels={'Importance': 'Relative Importance'})
         
-        # Plot the target variable
-        st.write(f"**Target Variable: {training_data['target_column']}**")
-        fig_target = go.Figure()
-        fig_target.add_trace(go.Scatter(x=y_train.index, y=y_train.values, name='Train', mode='lines', line=dict(color='blue')))
-        fig_target.add_trace(go.Scatter(x=y_test.index, y=y_test.values, name='Test', mode='lines', line=dict(color='orange')))
-        fig_target.update_layout(title=f"Target Variable Over Time", xaxis_title='Date', yaxis_title=training_data['target_column'], hovermode='x unified')
-        st.plotly_chart(fig_target, use_container_width=True)
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
 
-        # Plot a selected feature
-        st.write("**Feature Variables**")
-        feature_to_plot = st.selectbox("Select a feature to visualize:", X_full.columns.tolist())
+    corr = df_combined.corr()
+    fig = px.imshow(corr, text_auto=True, title='Feature Correlation Heatmap')
+    fig.update_layout(
+        xaxis_showgrid=False,
+        yaxis_showgrid=False,
+        xaxis_nticks=len(corr.columns),
+        yaxis_nticks=len(corr.index)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    for col in df_combined.columns:
+        fig = make_subplots(rows=1, cols=2, 
+                          subplot_titles=(f'{col} Distribution', f'{col} Box Plot'))
         
-        if feature_to_plot:
-            fig_feature = go.Figure()
-            fig_feature.add_trace(go.Scatter(x=X_train.index, y=X_train[feature_to_plot], name='Train', mode='lines', line=dict(color='blue')))
-            fig_feature.add_trace(go.Scatter(x=X_test.index, y=X_test[feature_to_plot], name='Test', mode='lines', line=dict(color='orange')))
-            fig_feature.update_layout(title=f"'{feature_to_plot}' Over Time", xaxis_title='Date', yaxis_title=feature_to_plot, hovermode='x unified')
-            st.plotly_chart(fig_feature, use_container_width=True)
-
-    except KeyError as e:
-        st.error(f"Could not generate time series plots. The training data is missing a required key: {e}")
-    except Exception as e:
-        st.error(f"An unexpected error occurred while creating time series plots: {e}")
+        fig.add_trace(go.Histogram(x=df_combined[col], name='Histogram'), row=1, col=1)
+        fig.add_trace(go.Box(y=df_combined[col], name='Box Plot'), row=1, col=2)
+        
+        fig.update_layout(height=400, showlegend=False, title_text=f'{col} Analysis')
+        
+        st.plotly_chart(fig, use_container_width=True)
 
 def display_prediction_visualizations(results_df, target_column='Target'):
     """Display visualizations for batch prediction results."""
