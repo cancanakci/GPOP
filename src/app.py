@@ -825,7 +825,7 @@ def main():
                     col1, col2 = st.columns(2)
                     with col1:
                         n_estimators = st.slider("Number of Trees (n_estimators)", 
-                                              min_value=50, max_value=500, 
+                                              min_value=50, max_value=800, 
                                               value=300, step=50)
                         learning_rate = st.slider("Learning Rate", 
                                                min_value=0.01, max_value=0.3, 
@@ -970,7 +970,7 @@ def main():
                 if selected_features:
                     # Configure trends
                     st.subheader("Feature Trends")
-                    years = st.slider("Number of years to project", 1, 50, 20)
+                    years = st.slider("Number of years to project", 1, 40, 20)
 
                     # --- Default trend settings ---
                     default_trends = {
