@@ -82,7 +82,7 @@ def enforce_frequency(
     )
 
     obj_cols = df_uniform.select_dtypes(include="object").columns
-    df_uniform[obj_cols] = df_uniform[obj_cols].fillna(method="ffill")
+    df_uniform[obj_cols] = df_uniform[obj_cols].ffill()
 
     if df_uniform.isna().any().any():
         raise RuntimeError(

@@ -1,6 +1,7 @@
 import os
 from train import train_model
 import joblib
+import pandas as pd
 
 def create_default_model():
     """Create and save the default model using the provided training data."""
@@ -14,8 +15,16 @@ def create_default_model():
         raise FileNotFoundError(f"Default training data not found at {default_data_path}")
     
     try:
-        # Train the model
-        metrics = train_model(default_data_path, "models", is_default=True)
+        # Determine the datetime column from the default data file
+        datetime_col = pd.read_excel(default_data_path, nrows=0).columns[0]
+        
+        # Train the model, providing the datetime column
+        metrics = train_model(
+            default_data_path, 
+            "models", 
+            is_default=True,
+            datetime_col=datetime_col
+        )
         print("\nDefault model created successfully!")
         print("\nModel Performance Summary:")
         print(f"R² Score: {metrics['metrics']['r2']:.4f}")

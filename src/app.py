@@ -52,7 +52,7 @@ def main():
                     training_file.seek(0)
 
                     datetime_col = st.selectbox("Select your datetime column", header_df.columns.tolist())
-                    frequency = st.selectbox("Select data frequency", ["1min", "5min", "15min", "30min", "1H", "2H", "4H", "6H", "8H", "12H", "1D"], index=4)
+                    frequency = st.selectbox("Select data frequency", ["1min", "5min", "15min", "30min", "1h", "2h", "4h", "6h", "8h", "12h", "1d"], index=4)
 
                     df = load_and_parse(training_file, datetime_col=datetime_col)
                     df = enforce_frequency(df, freq=frequency)
@@ -149,7 +149,7 @@ def main():
                     peek_df = pd.read_excel("data/default_data.xlsx", nrows=0)
                     datetime_col = peek_df.columns[0]
                     default_data = load_and_parse("data/default_data.xlsx", datetime_col=datetime_col)
-                    ts_data = enforce_frequency(default_data, freq='H')
+                    ts_data = enforce_frequency(default_data, freq='h')
                     target_col = joblib.load(os.path.join("models", "default_training_data.pkl")).get('target_column', ts_data.columns[-1])
                     brine_col = "Brine Flowrate (T/h)"
                     steam_col = "NCG+Steam Flowrate (T/h)"
