@@ -15,7 +15,7 @@ def check_input_values(input_df, training_data):
             - warning_flags_df is a DataFrame with boolean flags for each row and feature
             - yellow_warnings is a list of feature names with any yellow warnings
             - red_warnings is a list of feature names with any red warnings
-            - warning_ranges is a dict with min/max and IQR ranges for features with warnings
+            - warning_ranges is a dict with min/max ranges for features with warnings
     """
     yellow_warnings = []
     red_warnings = []
@@ -35,16 +35,11 @@ def check_input_values(input_df, training_data):
         # Get training data statistics
         train_min = X_train[feature].min()
         train_max = X_train[feature].max()
-        train_q1 = X_train[feature].quantile(0.25)
-        train_q3 = X_train[feature].quantile(0.75)
-        train_iqr = train_q3 - train_q1
         
         # Store ranges for features with warnings
         warning_ranges[feature] = {
             'min': train_min,
-            'max': train_max,
-            'iqr_lower': train_q1 - 1.5 * train_iqr,
-            'iqr_upper': train_q3 + 1.5 * train_iqr
+            'max': train_max
         }
         
         # Check input values for each row
@@ -57,12 +52,6 @@ def check_input_values(input_df, training_data):
                 # Only add the feature to red_warnings once
                 if feature not in red_warnings:
                     red_warnings.append(feature)
-            # Check for yellow warnings (outside IQR)
-            elif input_value < (train_q1 - 1.5 * train_iqr) or input_value > (train_q3 + 1.5 * train_iqr):
-                yellow_flags.loc[index, feature] = True
-                # Only add the feature to yellow_warnings once
-                if feature not in yellow_warnings:
-                    yellow_warnings.append(feature)
     
     # Create a combined warning flags DataFrame
     warning_flags_df = pd.DataFrame({

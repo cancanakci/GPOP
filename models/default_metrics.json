@@ -1,5 +1,5 @@
 {
-    "timestamp": "20250616_194435",
+    "timestamp": "20250617_153809",
     "model_type": "XGBoost",
     "metrics": {
         "mse": 0.5523150432968361,
@@ -684,7 +684,7 @@
         "Reinjection Temperature (\u00b0C)"
     ],
     "target_column": "Gross Power (MW)",
-    "plot_path": "models/actual_vs_predicted_20250616_194435.png",
+    "plot_path": "models/actual_vs_predicted_20250617_153809.png",
     "actual": [
         49.980000000000004,
         39.74827194213867,

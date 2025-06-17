@@ -68,14 +68,11 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
             for feature in feature_names:
                 if feature not in X_train.columns:
                     continue
-                train_q1 = X_train[feature].quantile(0.25)
-                train_q3 = X_train[feature].quantile(0.75)
-                train_iqr = train_q3 - train_q1
-                iqr_lower = train_q1 - 1.5 * train_iqr
-                iqr_upper = train_q3 + 1.5 * train_iqr
+                train_min = X_train[feature].min()
+                train_max = X_train[feature].max()
 
                 input_data[feature] = st.number_input(
-                    f"{feature} (IQR Range: {iqr_lower:.2f} - {iqr_upper:.2f})",
+                    f"{feature} (Range: {train_min:.2f} - {train_max:.2f})",
                     value=0.0,
                     format="%.4f",
                     key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_input_{feature}"

@@ -122,28 +122,4 @@ def sanity_checks(df: pd.DataFrame) -> None:
     if inferred is None:
         raise ValueError("Could not infer a constant frequency in DatetimeIndex")
     else:
-        print(f"[sanity_checks] Inferred constant frequency: {inferred}")
-
-# ----------------------------------------------------------------------
-# 4. Outlier detection & imputation
-# ----------------------------------------------------------------------
-def detect_and_impute_outliers(
-    df: pd.DataFrame, cols: List[str], z_threshold: float = 6.0
-) -> pd.DataFrame:
-    """
-    Detects univariate outliers above `z_threshold` standard deviations and treats
-    them as missing before calling interpolate.
-    """
-    df_out = df.copy()
-    for col in cols:
-        series = df_out[col]
-        z_scores = (series - series.mean()) / series.std()
-        mask = z_scores.abs() > z_threshold
-        if mask.any():
-            print(
-                f"[detect_and_impute_outliers] {mask.sum()} outliers found in '{col}'."
-            )
-            df_out.loc[mask, col] = np.nan
-
-    df_out.interpolate(method="linear", inplace=True, limit_direction="both")
-    return df_out 
+        print(f"[sanity_checks] Inferred constant frequency: {inferred}") 

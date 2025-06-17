@@ -15,7 +15,7 @@ import json
 import plotly.graph_objects as go
 
 # Internal modules
-from data_processing import load_and_parse, enforce_frequency, sanity_checks, detect_and_impute_outliers
+from data_processing import load_and_parse, enforce_frequency, sanity_checks
 from file_utils import load_latest_model_files, cleanup_old_models, load_default_model
 from ui_components import display_data_visualizations, display_model_metrics, plot_scenario
 from core import load_selected_model_components, handle_prediction_workflow, create_scenario_dataframe, apply_well_drilling_strategy
@@ -77,7 +77,8 @@ def main():
                     numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
                     if target_col in numeric_cols:
                         numeric_cols.remove(target_col)
-                    df = detect_and_impute_outliers(df, cols=numeric_cols)
+                    # Remove outlier detection and imputation
+                    # df = detect_and_impute_outliers(df, cols=numeric_cols)
 
                     st.session_state['training_data_for_viz'] = {
                         'X_train': df.drop(target_col, axis=1), 'y_train': df[target_col],
