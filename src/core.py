@@ -10,6 +10,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import joblib
 import os
 import time
+import plotly.graph_objects as go
 
 from predict import predict, check_input_values
 from file_utils import load_default_model
@@ -95,13 +96,44 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
                 st.error(f"Error making prediction: {str(e)}")
 
     else:
+        st.write("### Batch Prediction")
+        st.write("Upload a file with the same format as the training data. The file should contain the following columns:")
+        
+        if training_data is not None:
+            X_train = training_data['X_train']
+            example_df = X_train.head(1)
+            st.write("Required columns:")
+            st.dataframe(example_df)
+            
+            st.write("Example data ranges:")
+            ranges_df = pd.DataFrame({
+                'Feature': X_train.columns,
+                'Min Value': X_train.min(),
+                'Max Value': X_train.max()
+            })
+            st.dataframe(ranges_df)
+        
         prediction_file = st.file_uploader("Upload data for batch prediction (CSV or Excel)", type=['csv', 'xlsx'], key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_batch_file")
         if prediction_file is not None:
             try:
                 pred_df = pd.read_csv(prediction_file) if prediction_file.name.lower().endswith('.csv') else pd.read_excel(prediction_file)
+                
+                # Validate columns
+                if training_data is not None:
+                    missing_cols = set(X_train.columns) - set(pred_df.columns)
+                    extra_cols = set(pred_df.columns) - set(X_train.columns)
+                    
+                    if missing_cols:
+                        st.error(f"Missing required columns: {', '.join(missing_cols)}")
+                        st.stop()
+                    
+                    if extra_cols:
+                        st.warning(f"Extra columns found (will be ignored): {', '.join(extra_cols)}")
+                
                 st.success("File loaded successfully!")
                 st.write("Data Preview:")
                 st.dataframe(pred_df.head())
+                
                 if st.button("Make Predictions", key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_batch_predict"):
                     valid_features = [f for f in feature_names if f in pred_df.columns]
                     input_df = pred_df[valid_features].copy()
@@ -121,6 +153,86 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
                     st.dataframe(results_df)
                     csv = results_df.to_csv(index=False)
                     st.download_button("Download predictions as CSV", data=csv, file_name="predictions.csv", mime="text/csv")
+                    
+                    # Add visualizations
+                    st.subheader("Prediction Visualizations")
+                    
+                    # Create two columns for the plots
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Distribution plot
+                        fig_dist = go.Figure()
+                        fig_dist.add_trace(go.Histogram(
+                            x=results_df[f'Predicted {target_column}'],
+                            name='Distribution',
+                            nbinsx=30
+                        ))
+                        fig_dist.update_layout(
+                            title=f'Distribution of Predicted {target_column}',
+                            xaxis_title=f'Predicted {target_column}',
+                            yaxis_title='Count',
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_dist, use_container_width=True)
+                    
+                    with col2:
+                        # Box plot
+                        fig_box = go.Figure()
+                        fig_box.add_trace(go.Box(
+                            y=results_df[f'Predicted {target_column}'],
+                            name='Predictions',
+                            boxpoints='all'
+                        ))
+                        fig_box.update_layout(
+                            title=f'Box Plot of Predicted {target_column}',
+                            yaxis_title=f'Predicted {target_column}',
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_box, use_container_width=True)
+                    
+                    # Time series plot if datetime column exists
+                    datetime_cols = [col for col in results_df.columns if any(term in col.lower() for term in ['date', 'time', 'tarih'])]
+                    if datetime_cols:
+                        datetime_col = datetime_cols[0]  # Use the first datetime column found
+                        try:
+                            # Convert to datetime if not already
+                            if not pd.api.types.is_datetime64_any_dtype(results_df[datetime_col]):
+                                results_df[datetime_col] = pd.to_datetime(results_df[datetime_col])
+                            
+                            # Sort by datetime
+                            results_df = results_df.sort_values(datetime_col)
+                            
+                            # Create time series plot
+                            fig_ts = go.Figure()
+                            fig_ts.add_trace(go.Scatter(
+                                x=results_df[datetime_col],
+                                y=results_df[f'Predicted {target_column}'],
+                                mode='lines+markers',
+                                name='Predictions'
+                            ))
+                            
+                            # Add warning indicators if any
+                            if 'Has Red Warning' in results_df.columns:
+                                red_warning_points = results_df[results_df['Has Red Warning']]
+                                if not red_warning_points.empty:
+                                    fig_ts.add_trace(go.Scatter(
+                                        x=red_warning_points[datetime_col],
+                                        y=red_warning_points[f'Predicted {target_column}'],
+                                        mode='markers',
+                                        marker=dict(color='red', size=10, symbol='x'),
+                                        name='Red Warnings'
+                                    ))
+                            
+                            fig_ts.update_layout(
+                                title=f'Predicted {target_column} Over Time',
+                                xaxis_title='Time',
+                                yaxis_title=f'Predicted {target_column}',
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_ts, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Could not create time series plot: {str(e)}")
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
         else:
