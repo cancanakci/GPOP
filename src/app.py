@@ -317,7 +317,7 @@ def main():
                     fig_ncg.update_layout(title=f'{steam_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
                     st.plotly_chart(fig_ncg, use_container_width=True)
                     
-                    st.subheader(f"Number of make-up wells to drill over {years} years: **{len(pulses)}**")
+                    st.subheader(f"Expected number of make-up wells to drill over {years} years: **{len(pulses)}**")
 
                     if 'csv_with_sim' in st.session_state:
                         st.download_button("Download Scenario Data (with MUW simulation)", st.session_state.csv_with_sim, "scenario_predictions_with_MUW_simulation.csv", "text/csv")
