@@ -1,2 +1,5 @@
 /trial_grounds
 .DS_Store
+
+# Ignore the experiments folder and all its contents
+experiments/
