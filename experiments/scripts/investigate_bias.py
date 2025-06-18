@@ -8,7 +8,7 @@ import os
 
 def analyze_bias():
     # Load data
-    data = pd.read_excel("trial_grounds/data/raw/default_data_nopressure.xlsx")
+    data = pd.read_excel("../../data/default_data.xlsx")
     data['Datetime'] = pd.to_datetime(data['Datetime'])
     
     # 1. Analyze power output distribution by year
@@ -127,8 +127,8 @@ def analyze_bias():
     )
     
     fig.update_layout(height=800, title_text="Bias Analysis")
-    fig.write_html(os.path.join("experiments/plots", 'bias_analysis.html'))
-    print(f"\nBias analysis plot saved to experiments/plots/bias_analysis.html")
+    fig.write_html("../plots/bias_analysis.html")
+    print(f"\nBias analysis plot saved to ../plots/bias_analysis.html")
     
     return error_analysis, yearly_stats
 

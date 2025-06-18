@@ -11,10 +11,10 @@ import os
 from datetime import datetime, timedelta
 
 class TemporalDriftAnalyzer:
-    def __init__(self, data_path="trial_grounds/data/raw/default_data_nopressure.xlsx"):
+    def __init__(self, data_path="../../data/default_data.xlsx"):
         """Initialize the temporal drift analyzer."""
         self.data_path = data_path
-        self.output_dir = "experiments/plots"
+        self.output_dir = "../plots"
         os.makedirs(self.output_dir, exist_ok=True)
         self.train_years = [2020, 2021, 2022, 2023]
         self.results = {}

@@ -9,7 +9,7 @@ import os
 
 def analyze_feature_relationships():
     # Load data
-    data = pd.read_excel("trial_grounds/data/raw/default_data_nopressure.xlsx")
+    data = pd.read_excel("../../data/default_data.xlsx")
     data['Datetime'] = pd.to_datetime(data['Datetime'])
     data['Year'] = data['Datetime'].dt.year
     
@@ -137,7 +137,7 @@ def create_relationship_plots(data, features, target, yearly_correlations, yearl
         barmode='group',
         height=500
     )
-    fig_corr.write_html("experiments/plots/feature_correlations_over_time.html")
+    fig_corr.write_html("../plots/feature_correlations_over_time.html")
     
     # 2. Regression coefficients over time
     fig_coeff = go.Figure()
@@ -165,7 +165,7 @@ def create_relationship_plots(data, features, target, yearly_correlations, yearl
         yaxis_title='Coefficient Value',
         height=500
     )
-    fig_coeff.write_html("experiments/plots/regression_coefficients_over_time.html")
+    fig_coeff.write_html("../plots/regression_coefficients_over_time.html")
     
     # 3. Scatter plots for each feature vs target by year
     fig_scatter = make_subplots(
@@ -196,7 +196,7 @@ def create_relationship_plots(data, features, target, yearly_correlations, yearl
                 )
     
     fig_scatter.update_layout(height=600, title_text="Feature vs Power Output by Year")
-    fig_scatter.write_html("experiments/plots/feature_vs_power_scatter.html")
+    fig_scatter.write_html("../plots/feature_vs_power_scatter.html")
     
     # 4. Power output distribution by year
     fig_dist = go.Figure()
@@ -218,7 +218,7 @@ def create_relationship_plots(data, features, target, yearly_correlations, yearl
         barmode='overlay',
         height=500
     )
-    fig_dist.write_html("experiments/plots/power_distribution_by_year.html")
+    fig_dist.write_html("../plots/power_distribution_by_year.html")
     
     # 5. Summary statistics table
     summary_data = []
@@ -238,10 +238,10 @@ def create_relationship_plots(data, features, target, yearly_correlations, yearl
             })
     
     summary_df = pd.DataFrame(summary_data)
-    summary_df.to_csv("experiments/plots/feature_relationship_summary.csv", index=False)
+    summary_df.to_csv("../plots/feature_relationship_summary.csv", index=False)
     
-    print(f"\nPlots saved to experiments/plots/")
-    print(f"Summary table saved to experiments/plots/feature_relationship_summary.csv")
+    print(f"\nPlots saved to ../plots/")
+    print(f"Summary table saved to ../plots/feature_relationship_summary.csv")
 
 if __name__ == "__main__":
     analyze_feature_relationships() 
