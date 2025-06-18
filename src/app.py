@@ -217,7 +217,7 @@ def main():
 
                 if 'scenario_data' in st.session_state:
                     st.subheader(f"Scenario Results")
-                    st.plotly_chart(plot_scenario(st.session_state.scenario_data, st.session_state.years, st.session_state.target_col, st.session_state.feature_trends), use_container_width=True)
+                    plot_scenario(st.session_state.scenario_data, st.session_state.years, st.session_state.target_col, st.session_state.feature_trends)
                     st.download_button("Download Scenario (no simulation)", st.session_state.csv_no_sim, "scenario_no_sim.csv", "text/csv")
 
                     st.subheader("Well Drilling Simulation")

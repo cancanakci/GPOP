@@ -2,14 +2,23 @@ import os
 import joblib
 import streamlit as st
 import json
-from tensorflow.keras.models import load_model as keras_load_model
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def load_model(model_path):
     """Load a model from a file, supporting both .pkl and .keras formats."""
     if model_path.endswith('.pkl'):
         return joblib.load(model_path)
     elif model_path.endswith('.keras'):
-        return keras_load_model(model_path)
+        try:
+            from tensorflow.keras.models import load_model as keras_load_model
+            return keras_load_model(model_path)
+        except ImportError:
+            logger.error("TensorFlow not available for loading .keras models")
+            raise ValueError("TensorFlow required for .keras model files")
     else:
         raise ValueError(f"Unsupported model file format for {model_path}")
 
@@ -20,22 +29,22 @@ def load_default_model(models_dir):
         with open(metrics_path, 'r') as f:
             metrics = json.load(f)
         
-        model_path = metrics.get('model_path', os.path.join(models_dir, "default_model.pkl")) # Fallback for old metrics
+        model_path = metrics.get('model_path', os.path.join(models_dir, "default_model.pkl"))
         model = load_model(model_path)
         scaler = joblib.load(os.path.join(models_dir, "default_scaler.pkl"))
         feature_names = joblib.load(os.path.join(models_dir, "default_feature_names.pkl"))
         return model, scaler, feature_names
     except Exception as e:
-        print(f"Error loading default model files via metrics: {e}")
+        logger.error(f"Error loading default model files via metrics: {e}")
         try:
             # Fallback for old default model format without metrics.json
             model = joblib.load(os.path.join(models_dir, "default_model.pkl"))
             scaler = joblib.load(os.path.join(models_dir, "default_scaler.pkl"))
             feature_names = joblib.load(os.path.join(models_dir, "default_feature_names.pkl"))
-            print("Successfully loaded default model using fallback method.")
+            logger.info("Successfully loaded default model using fallback method.")
             return model, scaler, feature_names
         except Exception as e_fallback:
-            print(f"Fallback loading for default model failed: {e_fallback}")
+            logger.error(f"Fallback loading for default model failed: {e_fallback}")
             return None, None, None
 
 def load_latest_model_files(models_dir):
@@ -62,7 +71,7 @@ def load_latest_model_files(models_dir):
         
         return model, scaler, feature_names
     except Exception as e:
-        print(f"Error loading latest model files: {e}")
+        logger.error(f"Error loading latest model files: {e}")
         return None, None, None
 
 def cleanup_old_models(models_dir):
@@ -92,14 +101,14 @@ def cleanup_old_models(models_dir):
             files_to_keep.add(f"scaler_{timestamp}.pkl")
             files_to_keep.add(f"feature_names_{timestamp}.pkl")
         except Exception as e:
-            print(f"Could not read latest metrics file for cleanup: {e}")
+            logger.error(f"Could not read latest metrics file for cleanup: {e}")
 
     for file in all_files:
         if file not in files_to_keep:
             try:
                 os.remove(os.path.join(models_dir, file))
             except Exception as e:
-                print(f"Error removing file {file}: {e}")
+                logger.error(f"Error removing file {file}: {e}")
 
 def load_selected_model_components(model_option, models_dir):
     """Loads the appropriate model components based on user selection."""

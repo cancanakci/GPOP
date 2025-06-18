@@ -8,6 +8,11 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import List, Tuple, Union, IO
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # 1. I/O helpers
@@ -31,14 +36,17 @@ def load_and_parse(
     elif isinstance(file_source, (str, Path)):
         file_name = str(file_source).lower()
 
-    if file_name.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(file_source)
-    elif file_name.endswith((".parquet", ".pq")):
-        df = pd.read_parquet(file_source)
-    elif file_name.endswith((".feather", ".ft")):
-        df = pd.read_feather(file_source)
-    else: # Default to CSV
-        df = pd.read_csv(file_source)
+    try:
+        if file_name.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(file_source)
+        elif file_name.endswith((".parquet", ".pq")):
+            df = pd.read_parquet(file_source)
+        elif file_name.endswith((".feather", ".ft")):
+            df = pd.read_feather(file_source)
+        else: # Default to CSV
+            df = pd.read_csv(file_source)
+    except Exception as e:
+        raise ValueError(f"Error reading file {file_name}: {e}")
 
     if datetime_col:
         df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
@@ -57,7 +65,7 @@ def load_and_parse(
         df = df[~df.index.duplicated(keep="first")]
         dups = before - len(df)
         if dups:
-            print(f"[load_and_parse] Dropped {dups} duplicate rows")
+            logger.info(f"Dropped {dups} duplicate rows")
 
     return df
 
@@ -84,7 +92,7 @@ def enforce_frequency(
 
     num_gaps = df_uniform.isna().any(axis=1).sum()
     if num_gaps:
-        print(f"[enforce_frequency] Inserted {num_gaps} gap rows. Interpolating...")
+        logger.info(f"Inserted {num_gaps} gap rows. Interpolating...")
 
     df_uniform.interpolate(
         method=interp_method, limit=limit, limit_direction="both", inplace=True
@@ -122,4 +130,4 @@ def sanity_checks(df: pd.DataFrame) -> None:
     if inferred is None:
         raise ValueError("Could not infer a constant frequency in DatetimeIndex")
     else:
-        print(f"[sanity_checks] Inferred constant frequency: {inferred}") 
+        logger.info(f"Inferred constant frequency: {inferred}") 

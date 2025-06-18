@@ -6,6 +6,11 @@ Functions for handling file system interactions, like loading/saving models and 
 import os
 import joblib
 import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def load_latest_metrics(models_dir):
     """Load the latest metrics file from the models directory."""
@@ -17,8 +22,12 @@ def load_latest_metrics(models_dir):
     latest_metrics_file = sorted(metrics_files)[-1]
     metrics_path = os.path.join(models_dir, latest_metrics_file)
     
-    with open(metrics_path, 'r') as f:
-        return json.load(f)
+    try:
+        with open(metrics_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading metrics file {metrics_path}: {e}")
+        return None
 
 def load_default_model(models_dir):
     """Load the default model files."""
@@ -28,7 +37,7 @@ def load_default_model(models_dir):
         feature_names = joblib.load(os.path.join(models_dir, "default_feature_names.pkl"))
         return model, scaler, feature_names
     except Exception as e:
-        print(f"Error loading default model files: {e}")
+        logger.error(f"Error loading default model files: {e}")
         return None, None, None
 
 def load_latest_model_files(models_dir):
@@ -50,7 +59,7 @@ def load_latest_model_files(models_dir):
         feature_names = joblib.load(os.path.join(models_dir, latest_feature_names))
         return model, scaler, feature_names
     except Exception as e:
-        print(f"Error loading model files: {e}")
+        logger.error(f"Error loading model files: {e}")
         return None, None, None
 
 def load_training_data(models_dir):
@@ -65,7 +74,7 @@ def load_training_data(models_dir):
     try:
         return joblib.load(training_data_path)
     except Exception as e:
-        print(f"Error loading training data: {e}")
+        logger.error(f"Error loading training data: {e}")
         return None
 
 def cleanup_old_models(models_dir):
@@ -97,6 +106,6 @@ def cleanup_old_models(models_dir):
         if file not in files_to_keep:
             try:
                 os.remove(os.path.join(models_dir, file))
-                print(f"Removed old file: {file}")
+                logger.info(f"Removed old file: {file}")
             except Exception as e:
-                print(f"Error removing file {file}: {e}") 
+                logger.error(f"Error removing file {file}: {e}") 

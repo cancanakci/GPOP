@@ -2,6 +2,11 @@ import joblib
 import pandas as pd
 import numpy as np
 from scipy.stats import percentileofscore
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def check_input_values(input_df, training_data):
     """Check if input values are within the range of training data.
@@ -76,19 +81,10 @@ def predict(model, input_df):
     Returns:
         numpy array of predictions
     """
-    # Debug information
-    print("Input DataFrame shape (scaled):", input_df.shape)
-    print("Input DataFrame columns (scaled):", input_df.columns.tolist())
-    # print("Input DataFrame values (scaled):", input_df.values) # Avoid printing potentially large arrays
-    
     # Make prediction
     prediction = model.predict(input_df)
     
     # Clamp predictions below 0 to 0
     prediction = np.maximum(prediction, 0)
-    
-    # Debug information
-    print("Raw prediction:", prediction)
-    print("Prediction shape:", prediction.shape)
     
     return prediction

@@ -10,6 +10,11 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 from datetime import datetime
 import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def train_model(data_source, models_dir, target_column=None, datetime_col=None, start_date=None, freq=None, n_splits=5, is_default=False, model_params=None, test_size=0.2):
     """Loads data, preprocesses it, trains XGBoost model with cross-validation, and saves model with metrics."""
@@ -67,7 +72,7 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     # Save the list of feature names in the correct order BEFORE scaling
     feature_names = X.columns.tolist()
     joblib.dump(feature_names, feature_names_path)
-    print(f"Feature names saved to {feature_names_path}")
+    logger.info(f"Feature names saved to {feature_names_path}")
 
     # DEFAULT SPLIT IS 80/20
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
@@ -81,10 +86,10 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     X_train_scaled = pd.DataFrame(X_train_scaled, columns=feature_names)
     X_test_scaled = pd.DataFrame(X_test_scaled, columns=feature_names)
     
-    print("Scaled features using StandardScaler.")
+    logger.info("Scaled features using StandardScaler.")
 
     # --- Model Training and Evaluation ---
-    print("\nTraining XGBoostRegressor...")
+    logger.info("Training XGBoostRegressor...")
     
     # Use custom parameters if provided, otherwise use defaults
     default_params = {
@@ -105,7 +110,7 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
         # The grid search functionality has been removed for the default model
         # to ensure a simpler and faster process. The model will now train
         # using a predefined set of optimized default parameters.
-        print("Skipping hyperparameter tuning for the default model.")
+        logger.info("Skipping hyperparameter tuning for the default model.")
 
     # Update default parameters with custom parameters if provided
     if model_params:
@@ -114,7 +119,7 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     xgb_model = xgb.XGBRegressor(**default_params)
 
     # --- Cross-validation ---
-    print("\nPerforming 5-fold cross-validation...")
+    logger.info("Performing 5-fold cross-validation...")
     
     # Create a new dictionary of parameters without early stopping for CV
     cv_params = xgb_model.get_params()
@@ -126,9 +131,9 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     cv_mse_scores = -cross_val_score(cv_model, X_train_scaled, y_train, cv=kf, scoring='neg_mean_squared_error')
     cv_rmse_scores = np.sqrt(cv_mse_scores)
     
-    print(f"Cross-validation R² scores: {cv_r2_scores}")
-    print(f"Mean CV R²: {cv_r2_scores.mean():.4f} (+/- {cv_r2_scores.std() * 2:.4f})")
-    print(f"Mean CV RMSE: {cv_rmse_scores.mean():.4f} (+/- {cv_rmse_scores.std() * 2:.4f})")
+    logger.info(f"Cross-validation R² scores: {cv_r2_scores}")
+    logger.info(f"Mean CV R²: {cv_r2_scores.mean():.4f} (+/- {cv_r2_scores.std() * 2:.4f})")
+    logger.info(f"Mean CV RMSE: {cv_rmse_scores.mean():.4f} (+/- {cv_rmse_scores.std() * 2:.4f})")
 
     # Train final model on full training set
     if is_default:
@@ -154,10 +159,10 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     xgb_mse = mean_squared_error(y_test, xgb_preds)
     xgb_rmse = np.sqrt(xgb_mse)
     xgb_r2 = r2_score(y_test, xgb_preds)
-    print(f"\nFinal Test Set Performance:")
-    print(f"XGBoost Test MSE: {xgb_mse:.4f}")
-    print(f"XGBoost Test RMSE: {xgb_rmse:.4f}")
-    print(f"XGBoost Test R-squared: {xgb_r2:.4f}")
+    logger.info("Final Test Set Performance:")
+    logger.info(f"XGBoost Test MSE: {xgb_mse:.4f}")
+    logger.info(f"XGBoost Test RMSE: {xgb_rmse:.4f}")
+    logger.info(f"XGBoost Test R-squared: {xgb_r2:.4f}")
 
     # Plot Actual vs Predicted
     plt.figure(figsize=(8, 6))
@@ -168,11 +173,11 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     plt.title("XGBoost Actual vs Predicted")
     plot_path = os.path.join(models_dir, f"actual_vs_predicted_{timestamp}.png")
     plt.savefig(plot_path)
-    print(f"Actual vs Predicted plot saved to {plot_path}")
+    logger.info(f"Actual vs Predicted plot saved to {plot_path}")
     plt.close()
 
     # --- Save model and scaler ---
-    print("\nSaving model and scaler...")
+    logger.info("Saving model and scaler...")
     joblib.dump(xgb_model, model_path)
     joblib.dump(scaler, scaler_path)
     
@@ -187,9 +192,9 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     }
     joblib.dump(training_data, training_data_path)
     
-    print(f"XGBoost model saved to {model_path}")
-    print(f"Scaler saved to {scaler_path}")
-    print(f"Training data saved to {training_data_path}")
+    logger.info(f"XGBoost model saved to {model_path}")
+    logger.info(f"Scaler saved to {scaler_path}")
+    logger.info(f"Training data saved to {training_data_path}")
     
     # Save metrics
     metrics = {
@@ -203,31 +208,23 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
                 'r2_mean': float(cv_r2_scores.mean()),
                 'r2_std': float(cv_r2_scores.std()),
                 'rmse_mean': float(cv_rmse_scores.mean()),
-                'rmse_std': float(cv_rmse_scores.std()),
-                'cv_scores': {
-                    'r2': cv_r2_scores.tolist(),
-                    'rmse': cv_rmse_scores.tolist()
-                }
+                'rmse_std': float(cv_rmse_scores.std())
             },
             'loss_curve': {
-                'train_loss': train_loss,
-                'test_loss': test_loss
+                'train_loss': [float(x) for x in train_loss],
+                'test_loss': [float(x) for x in test_loss]
             }
         },
-        'model_params': xgb_model.get_params(),
-        'feature_names': list(feature_names),
-        'target_column': target_column,
-        'plot_path': plot_path,
+        'model_path': model_path,
+        'training_data_path': training_data_path,
         'actual': y_test.tolist(),
-        'predicted': xgb_preds.tolist(),
-        'training_data_path': training_data_path
+        'predicted': xgb_preds.tolist()
     }
     
-    # Save metrics to JSON file
     with open(metrics_path, 'w') as f:
-        json.dump(metrics, f, indent=4)
+        json.dump(metrics, f, indent=2)
     
-    print(f"Model metrics saved to {metrics_path}")
+    logger.info(f"Model metrics saved to {metrics_path}")
     
     return metrics
 

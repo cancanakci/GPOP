@@ -2,6 +2,11 @@ import os
 from train import train_model
 import joblib
 import pandas as pd
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def create_default_model():
     """Create and save the default model using the provided training data."""
@@ -34,15 +39,16 @@ def create_default_model():
             is_default=True,
             test_size=0.4
         )
-        print("\nDefault model created successfully!")
-        print("\nModel Performance Summary:")
-        print(f"R² Score: {metrics['metrics']['r2']:.4f}")
-        print(f"RMSE: {metrics['metrics']['rmse']:.4f}")
-        print(f"Cross-validation R²: {metrics['metrics']['cv_metrics']['r2_mean']:.4f} (±{metrics['metrics']['cv_metrics']['r2_std'] * 2:.4f})")
+        logger.info("Default model created successfully!")
+        logger.info("Model Performance Summary:")
+        logger.info(f"R² Score: {metrics['metrics']['r2']:.4f}")
+        logger.info(f"RMSE: {metrics['metrics']['rmse']:.4f}")
+        logger.info(f"Cross-validation R²: {metrics['metrics']['cv_metrics']['r2_mean']:.4f} (±{metrics['metrics']['cv_metrics']['r2_std'] * 2:.4f})")
         # Optionally, remove the temp file after training
         os.remove(temp_path)
     except Exception as e:
-        print(f"Error creating default model: {e}")
+        logger.error(f"Error creating default model: {e}")
+        raise
 
 if __name__ == "__main__":
     create_default_model() 

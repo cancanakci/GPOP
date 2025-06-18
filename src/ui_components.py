@@ -9,29 +9,30 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+import colorsys
 
 def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
     is_single_prediction = warning_flags_df is not None and len(warning_flags_df) == 1
 
     if red_warnings:
-        st.error("⚠️ Warning: The following features have values outside the training data range. This is usually caused by mismatched units, NaN inputs or mismatched features. Please verify values:")
+        st.error("⚠️ **Input Validation Warning**: The following features have values outside the training data range. This may indicate data quality issues, unit mismatches, or invalid inputs. Please verify your data:")
         for feature in red_warnings:
             ranges = warning_ranges[feature]
-            st.write(f"- {feature} (MIN/MAX Range: {ranges['min']:.2f} - {ranges['max']:.2f})")
+            st.write(f"- **{feature}** (Training Range: {ranges['min']:.2f} - {ranges['max']:.2f})")
 
     if yellow_warnings:
-        st.warning("⚠️ Note: The following features have values outside the typical interquartile range. Please verify values:")
+        st.warning("⚠️ **Data Quality Note**: The following features have values outside the typical interquartile range. Please verify your data:")
         for feature in yellow_warnings:
             ranges = warning_ranges[feature]
-            st.write(f"- {feature} (IQR Range: {ranges['iqr_lower']:.2f} - {ranges['iqr_upper']:.2f})")
+            st.write(f"- **{feature}** (IQR Range: {ranges['iqr_lower']:.2f} - {ranges['iqr_upper']:.2f})")
 
     if warning_flags_df is not None and not is_single_prediction:
         total_rows = len(warning_flags_df)
         red_warning_rows = warning_flags_df['has_red_warning'].sum()
         yellow_warning_rows = warning_flags_df['has_yellow_warning'].sum()
         
-        st.info(f"Warning Summary: {red_warning_rows} rows have red warnings, {yellow_warning_rows} rows have yellow warnings out of {total_rows} total rows.")
+        st.info(f"**Warning Summary**: {red_warning_rows} rows have validation warnings, {yellow_warning_rows} rows have quality warnings out of {total_rows} total rows.")
 
 def display_data_visualizations(training_data, model=None):
     """Display various visualizations for the test data only."""
@@ -102,17 +103,67 @@ def display_prediction_visualizations(results_df, target_column='Target'):
     
     st.plotly_chart(fig, use_container_width=True)
     
-    if 'Tarih' in results_df.columns:
-        fig = px.line(results_df, x='Tarih', y=f'Predicted {target_column}',
-                     title=f'Predicted {target_column} Over Time')
-        st.plotly_chart(fig, use_container_width=True)
+    # Time series plot if datetime column exists
+    datetime_cols = [col for col in results_df.columns if any(term in col.lower() for term in ['date', 'time', 'tarih', 'datetime'])]
+    if datetime_cols:
+        datetime_col = datetime_cols[0]  # Use the first datetime column found
+        try:
+            # Convert to datetime if not already
+            if not pd.api.types.is_datetime64_any_dtype(results_df[datetime_col]):
+                results_df[datetime_col] = pd.to_datetime(results_df[datetime_col], errors='coerce')
+            
+            # Remove rows with invalid datetime
+            valid_datetime_mask = results_df[datetime_col].notna()
+            if valid_datetime_mask.sum() > 0:
+                results_df_clean = results_df[valid_datetime_mask].copy()
+                
+                # Sort by datetime
+                results_df_clean = results_df_clean.sort_values(datetime_col)
+                
+                # Create time series plot
+                fig_ts = go.Figure()
+                fig_ts.add_trace(go.Scatter(
+                    x=results_df_clean[datetime_col],
+                    y=results_df_clean[f'Predicted {target_column}'],
+                    mode='lines+markers',
+                    name='Predictions',
+                    line=dict(color='#1f77b4', width=2)
+                ))
+                
+                # Add warning indicators if any
+                if 'Has Red Warning' in results_df_clean.columns:
+                    red_warning_points = results_df_clean[results_df_clean['Has Red Warning']]
+                    if not red_warning_points.empty:
+                        fig_ts.add_trace(go.Scatter(
+                            x=red_warning_points[datetime_col],
+                            y=red_warning_points[f'Predicted {target_column}'],
+                            mode='markers',
+                            marker=dict(color='red', size=10, symbol='x'),
+                            name='Data Quality Warnings'
+                        ))
+                
+                fig_ts.update_layout(
+                    title=f'Predicted {target_column} Over Time',
+                    xaxis_title='Time',
+                    yaxis_title=f'Predicted {target_column}',
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig_ts, use_container_width=True)
+            else:
+                st.warning("No valid datetime values found in the datetime column.")
+        except Exception as e:
+            st.warning(f"Could not create time series plot: {str(e)}")
     
-    corr = results_df.corr()[f'Predicted {target_column}'].sort_values(ascending=False)
-    fig = px.bar(x=corr.index, y=corr.values,
-                title='Feature Correlations with Predictions',
-                labels={'x': 'Features', 'y': 'Correlation'})
-    fig.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig, use_container_width=True)
+    # Feature correlations plot
+    try:
+        corr = results_df.corr()[f'Predicted {target_column}'].sort_values(ascending=False)
+        fig = px.bar(x=corr.index, y=corr.values,
+                    title='Feature Correlations with Predictions',
+                    labels={'x': 'Features', 'y': 'Correlation'})
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not create correlation plot: {str(e)}")
 
 def display_model_metrics(metrics):
     """Displays model metrics and visualizations in the sidebar (test set only)."""
@@ -163,6 +214,15 @@ def display_model_metrics(metrics):
                     labels={'value': 'RMSE Loss', 'variable': 'Dataset'})
         st.sidebar.plotly_chart(fig, use_container_width=True)
 
+def lighten_color(hex_color, amount=0.5):
+    """Lighten the given hex color by the given amount (0=original, 1=white)."""
+    hex_color = hex_color.lstrip('#')
+    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r/255, g/255, b/255)
+    l = min(1, l + (1 - l) * amount)
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return '#{:02x}{:02x}{:02x}'.format(int(r*255), int(g*255), int(b*255))
+
 def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     """Plots the scenario data with separate subplots for each feature."""
     if len(scenario_data) > 2000:
@@ -193,27 +253,59 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
         vertical_spacing=0.08
     )
 
+    # Define a color palette for different features
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    
+    # Calculate split date for historical vs projected data
     split_date = plot_data.index[-int(years * 365.25 * (plot_data.index.freq / pd.Timedelta(days=1)))] if len(plot_data) > 0 else pd.Timestamp.now()
 
+    # Plot target variable
     historical_target = plot_data[target_col][:split_date]
     future_target = plot_data[target_col][split_date:]
-    fig.add_trace(go.Scatter(x=historical_target.index, y=historical_target.values, name=f'{target_col} (Historical)', line=dict(color='blue', width=3)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=future_target.index, y=future_target.values, name=f'{target_col} (Predicted)', line=dict(color='lightblue', dash='dash', width=3)), row=1, col=1)
+    base_color = colors[0]
+    light_color = lighten_color(base_color, 0.5)
+    fig.add_trace(go.Scatter(
+        x=historical_target.index, 
+        y=historical_target.values, 
+        name=f'{target_col} (Historical)', 
+        line=dict(color=base_color, width=3)
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=future_target.index, 
+        y=future_target.values, 
+        name=f'{target_col} (Projected)', 
+        line=dict(color=light_color, width=3, dash='dash')
+    ), row=1, col=1)
 
+    # Plot each feature with unique colors
     for i, feature in enumerate(features, 2):
-        historical_data = plot_data[feature][:split_date]
-        future_data = plot_data[feature][split_date:]
-        fig.add_trace(go.Scatter(x=historical_data.index, y=historical_data.values, name=f'{feature} (Historical)'), row=i, col=1)
-        fig.add_trace(go.Scatter(x=future_data.index, y=future_data.values, name=f'{feature} (Projected)', line=dict(dash='dash')), row=i, col=1)
+        historical_feature = plot_data[feature][:split_date]
+        future_feature = plot_data[feature][split_date:]
+        
+        # Use different color for each feature, cycling through the palette
+        color_idx = (i - 1) % len(colors)
+        base_color = colors[color_idx]
+        light_color = lighten_color(base_color, 0.5)
+        
+        # Historical data (solid line, base color)
+        fig.add_trace(go.Scatter(
+            x=historical_feature.index, 
+            y=historical_feature.values, 
+            name=f'{feature} (Historical)', 
+            line=dict(color=base_color, width=2)
+        ), row=i, col=1)
+        
+        # Projected data (dashed line, lighter color)
+        fig.add_trace(go.Scatter(
+            x=future_feature.index, 
+            y=future_feature.values, 
+            name=f'{feature} (Projected)', 
+            line=dict(color=light_color, width=2, dash='dash')
+        ), row=i, col=1)
 
     fig.update_layout(
-        title=f'Feature Trends and {target_col} Prediction',
-        height=400 + 200 * n_features,
-        showlegend=False,
-        hovermode='x unified'
+        height=300 * (n_features + 1), 
+        title_text=f"Scenario Projection ({years} years)",
+        showlegend=True
     )
-    fig.update_yaxes(title_text=target_col, row=1, col=1)
-    for i, feature in enumerate(features, 2):
-        fig.update_yaxes(title_text=feature, row=i, col=1)
-
-    return fig 
+    st.plotly_chart(fig, use_container_width=True)
