@@ -34,24 +34,23 @@ def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None,
         st.info(f"Warning Summary: {red_warning_rows} rows have red warnings, {yellow_warning_rows} rows have yellow warnings out of {total_rows} total rows.")
 
 def display_data_visualizations(training_data, model=None):
-    """Display various visualizations for the training data."""
+    """Display various visualizations for the test data only."""
     if training_data is None:
         return
     
-    X_train = training_data['X_train']
     X_test = training_data['X_test']
-    y_train = training_data['y_train']
     y_test = training_data['y_test']
     feature_names = training_data['feature_names']
     target_column = training_data.get('target_column', 'Target')
     
-    X_combined = pd.concat([X_train, X_test])
-    y_combined = pd.concat([y_train, y_test])
+    if X_test is None or len(X_test) == 0:
+        st.info("No test set available. Visualizations will not be shown.")
+        return
     
-    df_combined = X_combined.copy()
-    df_combined[target_column] = y_combined.values
+    df_test = X_test.copy()
+    df_test[target_column] = y_test.values
     
-    st.subheader("Training Data")
+    st.subheader("Test Set Data")
     
     if model is not None and hasattr(model, 'feature_importances_'):
         importances = model.feature_importances_
@@ -69,8 +68,8 @@ def display_data_visualizations(training_data, model=None):
         fig.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
-    corr = df_combined.corr()
-    fig = px.imshow(corr, text_auto=True, title='Feature Correlation Heatmap')
+    corr = df_test.corr()
+    fig = px.imshow(corr, text_auto=True, title='Test Set Feature Correlation Heatmap')
     fig.update_layout(
         xaxis_showgrid=False,
         yaxis_showgrid=False,
@@ -79,15 +78,14 @@ def display_data_visualizations(training_data, model=None):
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    for col in df_combined.columns:
+    for col in df_test.columns:
         fig = make_subplots(rows=1, cols=2, 
                           subplot_titles=(f'{col} Distribution', f'{col} Box Plot'))
         
-        fig.add_trace(go.Histogram(x=df_combined[col], name='Histogram'), row=1, col=1)
-        fig.add_trace(go.Box(y=df_combined[col], name='Box Plot'), row=1, col=2)
+        fig.add_trace(go.Histogram(x=df_test[col], name='Histogram'), row=1, col=1)
+        fig.add_trace(go.Box(y=df_test[col], name='Box Plot'), row=1, col=2)
         
-        fig.update_layout(height=400, showlegend=False, title_text=f'{col} Analysis')
-        
+        fig.update_layout(height=400, showlegend=False, title_text=f'{col} Test Set Analysis')
         st.plotly_chart(fig, use_container_width=True)
 
 def display_prediction_visualizations(results_df, target_column='Target'):
@@ -117,7 +115,7 @@ def display_prediction_visualizations(results_df, target_column='Target'):
     st.plotly_chart(fig, use_container_width=True)
 
 def display_model_metrics(metrics):
-    """Displays model metrics and visualizations in the sidebar."""
+    """Displays model metrics and visualizations in the sidebar (test set only)."""
     if not metrics:
         st.sidebar.warning("No model metrics found.")
         return
@@ -130,7 +128,8 @@ def display_model_metrics(metrics):
 
     st.sidebar.subheader("Performance Metrics")
 
-    test_metrics = metrics.get('metrics', {}).get('test_metrics', {}) or metrics.get('metrics', {})
+    # Always use test set metrics
+    test_metrics = metrics.get('metrics', {})
     st.sidebar.write("Test Set Performance:")
     st.sidebar.write(f"R² Score: {test_metrics.get('r2', 0.0):.4f}")
     st.sidebar.write(f"RMSE: {test_metrics.get('rmse', 0.0):.4f}")
@@ -142,12 +141,13 @@ def display_model_metrics(metrics):
         st.sidebar.write(f"Mean R²: {cv_metrics.get('r2_mean', 0.0):.4f} (±{cv_metrics.get('r2_std', 0.0) * 2:.4f})")
         st.sidebar.write(f"Mean RMSE: {cv_metrics.get('rmse_mean', 0.0):.4f} (±{cv_metrics.get('rmse_std', 0.0) * 2:.4f})")
 
+    # Only plot actual vs predicted for the test set
     actual = metrics.get('actual')
     predicted = metrics.get('predicted')
     if actual and predicted:
         df_plot = pd.DataFrame({'Actual': actual, 'Predicted': predicted})
         fig = px.scatter(df_plot, x='Actual', y='Predicted',
-                         title='Actual vs Predicted',
+                         title='Test Set: Actual vs Predicted',
                          labels={'Actual': 'Actual Brüt Güç', 'Predicted': 'Predicted Brüt Güç'})
         min_val = min(min(actual), min(predicted))
         max_val = max(max(actual), max(predicted))
