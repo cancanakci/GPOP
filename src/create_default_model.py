@@ -41,13 +41,13 @@ def create_default_model():
         # Short hyperparameter tuning
         logger.info("Starting short hyperparameter tuning for default model...")
         param_grid = {
-            'n_estimators': [700],
-            'max_depth': [1, 3, 5],
-            'min_child_weight': [1,3, 5],
-            'learning_rate': [0.02],
+            'n_estimators': [500, 600, 700],
+            'max_depth': [3, 5],
+            'min_child_weight': [3, 5],
+            'learning_rate': [0.03],
             'subsample': [0.8],
             'colsample_bytree': [0.8],
-            'random_state': [12345],
+            'random_state': [42],
         }
         xgb_model = xgb.XGBRegressor(objective='reg:squarederror', n_jobs=-1, eval_metric='rmse')
         grid_search = GridSearchCV(xgb_model, param_grid, cv=3, scoring='neg_root_mean_squared_error', verbose=1)
@@ -76,4 +76,4 @@ def create_default_model():
         raise
 
 if __name__ == "__main__":
-    create_default_model() 
+    create_default_model()
