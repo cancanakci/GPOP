@@ -340,4 +340,87 @@ def apply_well_drilling_strategy(initial_future_features, initial_future_power, 
     progress_bar.progress(1.0, text="Simulation complete!")
     time.sleep(1)
     progress_bar.empty()
-    return adjusted_power, well_drilling_dates, adjusted_features 
+    return adjusted_power, well_drilling_dates, adjusted_features
+
+def handle_nextday_prediction(input_df, model, scaler, feature_names, actuals=None):
+    """
+    Handles the prediction and visualization for a 24-hour next-day forecast.
+
+    Args:
+        input_df (pd.DataFrame): DataFrame containing the input features for one prediction.
+        model (list): List of 24 XGBoost models.
+        scaler (StandardScaler): The fitted scaler.
+        feature_names (list): List of feature names.
+        actuals (pd.Series, optional): The actual target values for comparison. Defaults to None.
+    """
+    try:
+        # Scale the input features
+        input_scaled = scaler.transform(input_df)
+        input_scaled_df = pd.DataFrame(input_scaled, columns=input_df.columns)
+
+        # Make predictions for each hour
+        predictions = []
+        for hour in range(24):
+            pred = model[hour].predict(input_scaled_df)[0]
+            predictions.append(pred)
+
+        # --- Display Results ---
+        st.subheader("Next-Day Prediction Results")
+
+        # Create results DataFrame
+        prediction_date = pd.to_datetime(input_df.index[0]) + pd.Timedelta(days=1)
+        result_hours = pd.date_range(start=prediction_date.date(), periods=24, freq='H')
+        
+        results_df = pd.DataFrame({
+            'Hour': result_hours,
+            'Predicted Power (MW)': predictions
+        })
+
+        if actuals is not None:
+            results_df['Actual Power (MW)'] = actuals.values
+            results_df['Error (MW)'] = results_df['Predicted Power (MW)'] - results_df['Actual Power (MW)']
+
+        # Plot results
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=results_df['Hour'],
+            y=results_df['Predicted Power (MW)'],
+            mode='lines+markers',
+            name='Predicted',
+            line=dict(color='#2ca02c', width=3) # Green
+        ))
+        
+        if actuals is not None:
+            fig.add_trace(go.Scatter(
+                x=results_df['Hour'],
+                y=results_df['Actual Power (MW)'],
+                mode='lines+markers',
+                name='Actual',
+                line=dict(color='#009cfa', width=3) # Blue
+            ))
+
+        fig.update_layout(
+            title=f'Forecast for {prediction_date.strftime("%Y-%m-%d")}',
+            xaxis_title='Hour',
+            yaxis_title='Gross Power (MW)',
+            hovermode='x unified'
+        )
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.write("**Prediction Summary:**")
+            st.metric("Average Predicted Power", f"{np.mean(predictions):.2f} MW")
+            st.metric("Peak Power", f"{np.max(predictions):.2f} MW")
+            st.metric("Minimum Power", f"{np.min(predictions):.2f} MW")
+            if actuals is not None:
+                rmse = np.sqrt(np.mean(results_df['Error (MW)']**2))
+                st.metric("RMSE vs Actuals", f"{rmse:.2f} MW")
+
+        st.dataframe(results_df.set_index('Hour').round(2))
+
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
+        st.exception(e) 

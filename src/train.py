@@ -359,12 +359,10 @@ def train_nextday_model(data_source, models_dir, target_column=None, datetime_co
     
     logger.info(f"Overall performance: RMSE={overall_rmse:.4f}, R²={overall_r2:.4f}")
 
-    # --- Find and save the best test example ---
+    # --- Find and save example predictions ---
     y_pred_test = np.array(predictions).T  # Transpose to have shape (n_samples, 24)
     
-    best_rmse = float('inf')
-    best_example = {}
-
+    example_results = []
     for i in range(len(X_test)):
         actuals = y_test.iloc[i].values
         preds = y_pred_test[i]
@@ -372,22 +370,54 @@ def train_nextday_model(data_source, models_dir, target_column=None, datetime_co
         # Ensure we have a full 24-hour forecast to evaluate
         if len(actuals) == 24 and len(preds) == 24:
             rmse = np.sqrt(mean_squared_error(actuals, preds))
-            
-            if rmse < best_rmse:
-                best_rmse = rmse
-                best_example = {
-                    'input_features': X_test.iloc[i].to_dict(),
-                    'actual_values': actuals.tolist(),
-                    'predicted_values': preds.tolist(),
-                    'rmse': rmse,
-                    'input_timestamp': X_test.index[i]
-                }
+            example_results.append({
+                'input_features': X_test.iloc[i].to_dict(),
+                'actual_values': actuals.tolist(),
+                'predicted_values': preds.tolist(),
+                'rmse': rmse,
+                'input_timestamp': X_test.index[i]
+            })
 
-    if best_example:
-        logger.info(f"Best test example found with RMSE: {best_example['rmse']:.4f}")
-        example_path = os.path.join(models_dir, "nextday_best_example.pkl")
-        joblib.dump(best_example, example_path)
-        logger.info(f"Best test example saved to {example_path}")
+    if example_results:
+        # Sort examples by RMSE to find the median
+        example_results.sort(key=lambda x: x['rmse'])
+        
+        # Get 5 examples centered around the median RMSE
+        num_examples = len(example_results)
+        if num_examples >= 5:
+            median_index = num_examples // 2
+            start_index = max(0, median_index - 2)
+            end_index = start_index + 5
+            # Adjust if we're at the end of the list
+            if end_index > num_examples:
+                end_index = num_examples
+                start_index = end_index - 5
+            
+            examples_to_save = example_results[start_index:end_index]
+            logger.info(f"Saving 5 average prediction examples (centered around median RMSE) from the test set.")
+        else:
+            # If less than 5 examples, just save all of them
+            examples_to_save = example_results
+            logger.info(f"Saving all {num_examples} prediction examples from the test set (fewer than 5 available).")
+        
+        # Save the examples list
+        examples_path = os.path.join(models_dir, "nextday_examples.pkl")
+        joblib.dump(examples_to_save, examples_path)
+        logger.info(f"Test examples saved to {examples_path}")
+
+        # Remove the old single best example file if it exists
+        old_example_path = os.path.join(models_dir, "nextday_best_example.pkl")
+        if os.path.exists(old_example_path):
+            try:
+                os.remove(old_example_path)
+                logger.info(f"Removed old example file: {old_example_path}")
+            except OSError as e:
+                logger.error(f"Error removing old example file {old_example_path}: {e}")
+
+    # Save test data for UI components
+    test_data_path = os.path.join(models_dir, "nextday_test_data.pkl")
+    joblib.dump((X_test, y_test), test_data_path)
+    logger.info(f"Test data saved for UI: {test_data_path}")
     
     # Save models and scaler
     model_path = os.path.join(models_dir, "nextday_model.pkl")
@@ -412,9 +442,12 @@ def train_nextday_model(data_source, models_dir, target_column=None, datetime_co
         'hourly_metrics': metrics_per_hour,
         'model_path': model_path,
         'scaler_path': scaler_path,
-        'feature_names_path': feature_names_path,
-        'best_test_example_rmse': best_example.get('rmse') # Add best RMSE to metrics
+        'feature_names_path': feature_names_path
     }
+
+    if example_results:
+        # Save RMSEs for the top examples for reference
+        metrics['example_rmses'] = [ex['rmse'] for ex in examples_to_save]
     
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)

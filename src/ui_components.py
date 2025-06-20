@@ -571,3 +571,86 @@ def display_cleaning_summary(cleaning_steps: list):
     """Display a summary of cleaning steps in the UI."""
     if cleaning_steps:
         st.info("**Data Cleaning Summary:**\n" + "\n".join(f"- {step}" for step in cleaning_steps))
+
+def display_nextday_prediction_examples(examples: list, title: str):
+    """
+    Displays the actual vs. predicted values for multiple next-day prediction examples on a single plot.
+    
+    Args:
+        examples (list): A list of dictionaries, each containing prediction data.
+        title (str): The title for the expander.
+    """
+    with st.expander(title, expanded=True):
+        if not examples:
+            st.warning("No prediction examples to display.")
+            return
+
+        # --- Chart 1: Actual vs. Predicted ---
+        fig1 = go.Figure()
+        
+        # Define a color palette for the examples
+        colors = px.colors.qualitative.Plotly
+
+        for i, example_data in enumerate(examples):
+            color = colors[i % len(colors)]
+            prediction_date = pd.to_datetime(example_data['input_timestamp']) + pd.Timedelta(days=1)
+            
+            # Create a common set of hours for the x-axis
+            hours = [f"{h:02d}:00" for h in range(24)]
+
+            # Add predicted line
+            fig1.add_trace(go.Scatter(
+                x=hours, 
+                y=example_data['predicted_values'], 
+                name=f"Predicted (Example {i+1})",
+                mode='lines+markers', 
+                line=dict(color=color, dash='dash'),
+                legendgroup=f"group{i}"
+            ))
+            
+            # Add actual line
+            fig1.add_trace(go.Scatter(
+                x=hours, 
+                y=example_data['actual_values'], 
+                name=f"Actual (Example {i+1})",
+                mode='lines', 
+                line=dict(color=color, width=3),
+                legendgroup=f"group{i}"
+            ))
+
+        fig1.update_layout(
+            title="Prediction Examples from Test Set",
+            xaxis_title="Hour of Day",
+            yaxis_title="Gross Power (MW)",
+            yaxis_range=[20, 60],  # Set fixed y-axis range
+            legend_title="Predictions"
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # --- Chart 2: Prediction Error ---
+        fig2 = go.Figure()
+
+        for i, example_data in enumerate(examples):
+            color = colors[i % len(colors)]
+            actuals = np.array(example_data['actual_values'])
+            predicted = np.array(example_data['predicted_values'])
+            error = predicted - actuals
+            hours = [f"{h:02d}:00" for h in range(24)]
+
+            fig2.add_trace(go.Bar(
+                x=hours, 
+                y=error, 
+                name=f"Error (Example {i+1})",
+                marker_color=color
+            ))
+
+        # Add a line for perfect prediction (zero error)
+        fig2.add_hline(y=0, line_dash="dash", line_color="grey")
+
+        fig2.update_layout(
+            title="Prediction Error by Hour of Day",
+            xaxis_title="Hour of Day",
+            yaxis_title="Prediction Error (MW)",
+            barmode='group'
+        )
+        st.plotly_chart(fig2, use_container_width=True)

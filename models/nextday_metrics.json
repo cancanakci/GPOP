@@ -1,5 +1,5 @@
 {
-  "timestamp": "20250620_141712",
+  "timestamp": "20250620_144454",
   "model_type": "NextDay_XGBoost",
   "window_hours": 24,
   "overall_metrics": {
@@ -156,5 +156,11 @@
   "model_path": "models/nextday_model.pkl",
   "scaler_path": "models/nextday_scaler.pkl",
   "feature_names_path": "models/nextday_feature_names.pkl",
-  "best_test_example_rmse": 0.11686183865901764
+  "example_rmses": [
+    0.8315916740833786,
+    0.8316048482492701,
+    0.8318528788115228,
+    0.8325148725309377,
+    0.8327787884031065
+  ]
 }

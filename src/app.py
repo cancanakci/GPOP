@@ -17,8 +17,22 @@ import plotly.graph_objects as go
 # Internal modules
 from data_processing import load_and_parse, enforce_frequency, sanity_checks, prepare_nextday_input, create_nextday_features
 from file_utils import load_latest_model_files, cleanup_old_models, load_default_model
-from ui_components import display_data_visualizations, display_model_metrics, plot_scenario, display_time_series_analysis, clean_time_series_data, display_cleaning_summary
-from core import load_selected_model_components, handle_prediction_workflow, create_scenario_dataframe, apply_well_drilling_strategy
+from ui_components import (
+    display_data_visualizations, 
+    display_model_metrics, 
+    plot_scenario, 
+    display_time_series_analysis, 
+    clean_time_series_data, 
+    display_cleaning_summary,
+    display_nextday_prediction_examples
+)
+from core import (
+    load_selected_model_components, 
+    handle_prediction_workflow, 
+    create_scenario_dataframe, 
+    apply_well_drilling_strategy,
+    handle_nextday_prediction
+)
 from train import train_model, train_nextday_model
 
 @st.cache_data
@@ -320,322 +334,113 @@ def main():
 
     # --- Next Day Prediction Tab ---
     with nextday_tab:
-        st.header("Next Day Prediction")
-        st.write("Upload today's operational data (24 hours) to predict tomorrow's hourly gross power output.")
+        st.header("Next-Day Power Prediction")
         
-        # Show expected upload file format
-        st.subheader("Expected Upload File Format")
-        st.write("Your CSV/Excel file should contain exactly 24 rows (one for each hour) with the following columns:")
+        # Paths for next-day model
+        nextday_models_dir = "models"
+        nextday_model_path = os.path.join(nextday_models_dir, "nextday_model.pkl")
         
-        # Create example data (updated to remove pressure differential)
-        example_data = pd.DataFrame({
-            'datetime': pd.date_range('2024-01-15 00:00:00', periods=24, freq='H'),
-            'Brine Flowrate (T/h)': [1200 + i*2 for i in range(24)],
-            'NCG+Steam Flowrate (T/h)': [450 - i*1.2 for i in range(24)],
-            'Ambient Temperature (°C)': [15 - i*0.3 for i in range(24)],
-        })
-        
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.write("**Required columns:**")
-            st.dataframe(example_data.head(6), use_container_width=True)
-            st.write("*Note: The 'Gross Power (MW)' column is used for validation but not for prediction*")
-        
-        with col2:
-            st.write("**File requirements:**")
-            st.write("• Exactly 24 rows (hours)")
-            st.write("• Hourly data (00:00 to 23:00)")
-            st.write("• Datetime column (optional)")
-            st.write("• All feature columns present")
-        
-        # Download example file
-        csv_example = example_data.to_csv(index=False)
-        st.download_button(
-            "Download Example File (CSV)",
-            data=csv_example,
-            file_name="example_nextday_input.csv",
-            mime="text/csv"
-        )
-        
-        # Check if next-day model exists
-        nextday_model_path = os.path.join(models_dir, "nextday_model.pkl")
         if not os.path.exists(nextday_model_path):
-            st.warning("Next-day prediction model not found. Please train the model first.")
+            st.warning("Next-day prediction model not found. Please train it first.")
             if st.button("Train Next-Day Model"):
-                with st.spinner("Training next-day prediction model..."):
-                    try:
-                        # Load default data for training
-                        default_data = pd.read_excel("data/default_data.xlsx")
-                        datetime_col = default_data.columns[0]
-                        target_col = "Gross Power (MW)"  # Assuming this is the target
-                        
-                        # Train the next-day model
-                        metrics = train_nextday_model(
-                            data_source="data/default_data.xlsx",
-                            models_dir=models_dir,
-                            target_column=target_col,
-                            datetime_col=datetime_col,
-                            window_hours=24
-                        )
-                        
-                        st.success("Next-day prediction model trained successfully!")
-                        st.json(metrics)
-                        
-                    except Exception as e:
-                        st.error(f"Error training next-day model: {e}")
-                        st.exception(e)
+                try:
+                    with st.spinner("Training next-day model... This may take a few minutes."):
+                        # Use default data for training
+                        default_data = load_default_data_cached()
+                        if default_data is not None:
+                            # Use last column as target for default training
+                            target_column = default_data.columns[-1]
+                            train_nextday_model(
+                                data_source="data/default_data.xlsx",
+                                models_dir=nextday_models_dir,
+                                target_column=target_column,
+                                datetime_col=default_data.columns[0] # Use first col as datetime
+                            )
+                    st.success("Next-day model trained successfully!")
+                    st.rerun() # Rerun to load the trained model
+                except Exception as e:
+                    st.error(f"Error training next-day model: {e}")
+                    st.exception(e)
         else:
+            # --- Load Next-Day Model Components ---
             try:
-                nextday_models = joblib.load(nextday_model_path)
-                nextday_scaler = joblib.load(os.path.join(models_dir, "nextday_scaler.pkl"))
-                nextday_feature_names = joblib.load(os.path.join(models_dir, "nextday_feature_names.pkl"))
-                
-                # Load metrics
-                nextday_metrics_path = os.path.join(models_dir, "nextday_metrics.json")
+                nextday_model = joblib.load(nextday_model_path)
+                nextday_scaler = joblib.load(os.path.join(nextday_models_dir, "nextday_scaler.pkl"))
+                nextday_feature_names = joblib.load(os.path.join(nextday_models_dir, "nextday_feature_names.pkl"))
+                nextday_metrics_path = os.path.join(nextday_models_dir, "nextday_metrics.json")
                 if os.path.exists(nextday_metrics_path):
-                    with open(nextday_metrics_path, 'r') as f:
+                    with open(nextday_metrics_path) as f:
                         nextday_metrics = json.load(f)
-                
-                st.success("Next-day prediction model loaded successfully!")
-                
-                # Display model performance
-                if 'nextday_metrics' in locals():
-                    st.subheader("Model Performance")
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Overall RMSE", f"{nextday_metrics['overall_metrics']['rmse']:.4f}")
-                    with col2:
-                        st.metric("Overall R²", f"{nextday_metrics['overall_metrics']['r2']:.4f}")
-                    with col3:
-                        st.metric("Window Hours", nextday_metrics['window_hours'])
-                    with col4:
-                        st.metric("Best Test Day RMSE", f"{nextday_metrics.get('best_test_example_rmse', 'N/A'):.4f}")
-                
-                # --- Show best test example ---
-                st.subheader("Best Prediction Example from Test Set")
-                example_path = os.path.join(models_dir, "nextday_best_example.pkl")
-                if os.path.exists(example_path):
-                    try:
-                        best_example = joblib.load(example_path)
-                        
-                        actual_values = best_example['actual_values']
-                        predicted_values = best_example['predicted_values']
-                        rmse = best_example['rmse']
-                        input_date = pd.to_datetime(best_example['input_timestamp']).strftime('%Y-%m-%d')
-                        prediction_date = (pd.to_datetime(best_example['input_timestamp']) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-
-                        st.write(f"This example shows the model's best performance on the test set, predicting for **{prediction_date}** based on data from **{input_date}**.")
-
-                        # Create comparison DataFrame
-                        hours = pd.date_range(start=prediction_date, periods=24, freq='H')
-                        comparison_df = pd.DataFrame({
-                            'Hour': hours,
-                            'Actual (MW)': actual_values,
-                            'Predicted (MW)': predicted_values,
-                        })
-                        comparison_df['Error (MW)'] = comparison_df['Predicted (MW)'] - comparison_df['Actual (MW)']
-                        
-                        # --- Visualization: Actual vs Predicted ---
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=comparison_df['Hour'],
-                            y=comparison_df['Actual (MW)'],
-                            mode='lines+markers',
-                            name='Actual',
-                            line=dict(color='#1f77b4', width=3),
-                            marker=dict(size=8)
-                        ))
-                        fig.add_trace(go.Scatter(
-                            x=comparison_df['Hour'],
-                            y=comparison_df['Predicted (MW)'],
-                            mode='lines+markers',
-                            name='Predicted',
-                            line=dict(color='#ff7f0e', width=3, dash='dash'),
-                            marker=dict(size=8, symbol='diamond')
-                        ))
-                        
-                        fig.update_layout(
-                            title=f'Best Example: Actual vs Predicted Power ({prediction_date})',
-                            xaxis_title='Hour',
-                            yaxis_title='Gross Power (MW)',
-                            yaxis_range=[0, 60], # Set fixed y-axis range
-                            hovermode='x unified',
-                            height=400,
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-
-                        # --- Visualization: Prediction Error Plot ---
-                        fig_errors = go.Figure()
-                        fig_errors.add_trace(go.Scatter(
-                            x=list(range(24)),
-                            y=comparison_df['Error (MW)'],
-                            mode='lines+markers',
-                            name=f'Error on {prediction_date}',
-                            line=dict(color='#d62728', width=2),
-                            marker=dict(size=6)
-                        ))
-                        fig_errors.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Perfect Prediction", annotation_position="bottom right")
-                        fig_errors.update_layout(
-                            title='Prediction Error by Hour of Day (Best Example)',
-                            xaxis_title='Hour of Day',
-                            yaxis_title='Prediction Error (MW)',
-                            hovermode='x unified',
-                            height=400
-                        )
-                        st.plotly_chart(fig_errors, use_container_width=True)
-
-                        # --- Summary Statistics ---
-                        st.write("**Prediction Summary for Best Example:**")
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("RMSE", f"{rmse:.2f} MW")
-                        col2.metric("Mean Absolute Error", f"{np.mean(np.abs(comparison_df['Error (MW)'].values)):.2f} MW")
-                        col3.metric("Max Error", f"{comparison_df['Error (MW)'].abs().max():.2f} MW")
-                        
-                    except Exception as e:
-                        st.warning(f"Could not load or display the best prediction example: {e}")
                 else:
-                    st.info("Best prediction example file not found. Please re-run the `create_default_model.py` script.")
+                    nextday_metrics = {}
 
-                # File upload for today's data
-                st.subheader("Make Your Prediction")
+                st.success("Next-day prediction model loaded successfully.")
+                
+                # --- Display Model Performance ---
+                st.subheader("Model Performance")
+                overall_metrics = nextday_metrics.get('overall_metrics', {})
+                col1, col2 = st.columns(2)
+                col1.metric("Overall RMSE", f"{overall_metrics.get('rmse', 0):.4f}")
+                col2.metric("Overall R²", f"{overall_metrics.get('r2', 0):.4f}")
+
+                # --- Display Prediction Examples ---
+                examples_path = os.path.join(nextday_models_dir, "nextday_examples.pkl")
+                if os.path.exists(examples_path):
+                    examples = joblib.load(examples_path)
+                    display_nextday_prediction_examples(
+                        examples, 
+                        "Prediction Examples from Test Set"
+                    )
+                else:
+                    st.info("Prediction examples not found. Please retrain the model to generate them.")
+
+                # --- Make New Predictions ---
+                st.subheader("Make a New 24-Hour Prediction")
+                
                 uploaded_file = st.file_uploader(
-                    "Upload today's operational data (CSV or Excel)", 
-                    type=['csv', 'xlsx'], 
-                    key="nextday_upload"
+                    "Upload a CSV or Excel file with 24 rows of data to make a new prediction.",
+                    type=['csv', 'xlsx']
                 )
                 
                 if uploaded_file:
                     try:
-                        # Load and process the uploaded data
-                        if uploaded_file.name.endswith('.csv'):
-                            user_data = pd.read_csv(uploaded_file)
-                        else:
-                            user_data = pd.read_excel(uploaded_file)
-
-                        # --- Data Validation ---
-                        st.write("Uploaded Data Preview:")
-                        st.dataframe(user_data.head(), use_container_width=True)
-
-                        if len(user_data) != 24:
-                            st.error(f"Error: Expected 24 rows (one for each hour), but got {len(user_data)}.")
-                            st.stop()
-                        
-                        # Find datetime column if it exists
-                        datetime_col = None
-                        for col in user_data.columns:
-                            if 'date' in col.lower() or 'time' in col.lower():
-                                datetime_col = col
-                                break
-                        
-                        if datetime_col:
-                            try:
-                                user_data[datetime_col] = pd.to_datetime(user_data[datetime_col])
-                                user_data = user_data.set_index(datetime_col)
-                            except Exception:
-                                st.warning("Could not parse the datetime column. Proceeding without a time index.")
-                                user_data = user_data.drop(columns=[datetime_col])
-                        
-                        # Check for required feature columns
-                        base_features = [f.split('_hour_')[0] for f in nextday_feature_names if '_hour_' in f]
-                        base_features = sorted(list(set(base_features))) # Get unique base features
-                        
-                        missing_cols = [col for col in base_features if col not in user_data.columns]
-                        
-                        if missing_cols:
-                            st.error(f"Error: The following required columns are missing from your upload: {', '.join(missing_cols)}")
-                            st.stop()
-
-                        # --- Prepare input for prediction ---
-                        # Add a dummy target column as it's expected by the processing function
-                        user_data["Gross Power (MW)"] = 0
-                        
-                        # Select only the necessary columns in the correct order for the model
-                        user_data_ordered = user_data[base_features + ["Gross Power (MW)"]]
-
-                        input_features = create_nextday_features(user_data_ordered, "Gross Power (MW)", window_hours=24, silent=True)
-                        
-                        # Scale features
-                        input_scaled = nextday_scaler.transform(input_features.drop(columns=['timestamp']))
-                        input_scaled_df = pd.DataFrame(input_scaled, columns=nextday_feature_names)
-                        
-                        # Make predictions
-                        predictions = []
-                        for hour in range(24):
-                            pred = nextday_models[hour].predict(input_scaled_df)[0]
-                            predictions.append(pred)
-                        
-                        # --- Display Prediction Results ---
-                        st.subheader("Your Next-Day Power Prediction")
-                        
-                        # Create results DataFrame
-                        prediction_date = pd.to_datetime(user_data.index.max() if isinstance(user_data.index, pd.DatetimeIndex) else "today") + pd.Timedelta(days=1)
-                        result_hours = pd.date_range(start=prediction_date.date(), periods=24, freq='H')
-                        
-                        results_df = pd.DataFrame({
-                            'Hour': result_hours,
-                            'Predicted Power (MW)': predictions
-                        })
-                        
-                        # Plot results
-                        fig_pred = go.Figure()
-                        fig_pred.add_trace(go.Scatter(
-                            x=results_df['Hour'],
-                            y=results_df['Predicted Power (MW)'],
-                            mode='lines+markers',
-                            name='Predicted',
-                            line=dict(color='#2ca02c', width=3),
-                            marker=dict(size=8)
-                        ))
-                        
-                        fig_pred.update_layout(
-                            title=f'Predicted Gross Power for {prediction_date.strftime("%Y-%m-%d")}',
-                            xaxis_title='Hour',
-                            yaxis_title='Gross Power (MW)',
-                            hovermode='x unified',
-                            height=400
-                        )
-                        
-                        col1, col2 = st.columns([1, 1])
-                        with col1:
-                            st.plotly_chart(fig_pred, use_container_width=True)
-                        
-                        with col2:
-                            st.write("**Prediction Summary:**")
-                            st.metric("Average Predicted Power", f"{np.mean(predictions):.2f} MW")
-                            st.metric("Peak Power", f"{np.max(predictions):.2f} MW")
-                            st.metric("Minimum Power", f"{np.min(predictions):.2f} MW")
-
-                            st.write("**Predicted Hourly Values:**")
-                            st.dataframe(results_df.set_index('Hour').round(2), use_container_width=True, height=250)
+                        # Use cached data to get target column name
+                        default_data = load_default_data_cached()
+                        if default_data is not None:
+                            target_column = default_data.columns[-1]
                             
-                        # Download button for predictions
-                        csv_pred = results_df.to_csv(index=False)
-                        st.download_button(
-                            "Download Predictions (CSV)",
-                            data=csv_pred,
-                            file_name=f"nextday_prediction_{prediction_date.strftime('%Y%m%d')}.csv",
-                            mime="text/csv"
-                        )
+                            # Prepare input for prediction
+                            input_df, error = prepare_nextday_input(uploaded_file, target_column, window_hours=24)
+                            
+                            if error:
+                                st.error(error)
+                            else:
+                                st.write("Input Features (24-hour window):")
+                                st.dataframe(input_df.T)
+
+                                if st.button("Predict for uploaded data"):
+                                    handle_nextday_prediction(input_df, nextday_model, nextday_scaler, nextday_feature_names)
 
                     except Exception as e:
-                        st.error("An error occurred while processing your file.")
+                        st.error(f"Error processing uploaded file: {e}")
                         st.exception(e)
+
             except Exception as e:
-                st.error(f"Error loading next-day model: {e}")
-        
-        # Add a button to retrain all models
-        st.sidebar.subheader("Model Management")
-        if st.sidebar.button("Re-train All Models", key="retrain_all"):
-            with st.spinner("Re-training all models from `data/default_data.xlsx`... This may take a few minutes."):
-                try:
-                    import create_default_model
-                    create_default_model.main()
-                    st.success("All models have been re-trained successfully!")
-                    st.rerun() # Rerun the app to load new models
-                except Exception as e:
-                    st.error(f"An error occurred during re-training: {e}")
-                    st.exception(e)
+                st.error(f"Error loading next-day model components: {e}")
+                st.exception(e)
+
+    # Add a button to retrain all models
+    st.sidebar.subheader("Model Management")
+    if st.sidebar.button("Re-train All Models", key="retrain_all"):
+        with st.spinner("Re-training all models from `data/default_data.xlsx`... This may take a few minutes."):
+            try:
+                import create_default_model
+                create_default_model.main()
+                st.success("All models have been re-trained successfully!")
+                st.rerun() # Rerun the app to load new models
+            except Exception as e:
+                st.error(f"An error occurred during re-training: {e}")
+                st.exception(e)
 
 def about_page():
     st.title("About GPOP")
