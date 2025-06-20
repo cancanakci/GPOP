@@ -31,7 +31,9 @@ from core import (
     handle_prediction_workflow, 
     create_scenario_dataframe, 
     apply_well_drilling_strategy,
-    handle_nextday_prediction
+    handle_nextday_prediction,
+    generate_naive_predictions,
+    handle_nextday_prediction_with_baselines
 )
 from train import train_model, train_nextday_model
 
@@ -397,29 +399,97 @@ def main():
                 # --- Make New Predictions ---
                 st.subheader("Make a New 24-Hour Prediction")
                 
+                # Get target column name first
+                default_data = load_default_data_cached()
+                if default_data is not None:
+                    target_column = default_data.columns[-1]
+                
+                # Show expected format to user
+                st.write("**Required File Format:**")
+                if default_data is not None:
+                    # Create example format
+                    example_cols = [col for col in default_data.columns if col != target_column] + [target_column]
+                    example_data = default_data[example_cols].head(3).copy()
+                    example_data.index.name = 'datetime'
+                    
+                    st.write("Your file should have exactly **24 rows** (one for each hour) with these columns:")
+                    st.dataframe(example_data, use_container_width=True)
+                    
+                    st.write("**Column Requirements:**")
+                    for i, col in enumerate(example_cols, 1):
+                        if col == target_column:
+                            st.write(f"{i}. **{col}** - Target values for the day you want to predict the next day from")
+                        elif 'datetime' in col.lower() or 'date' in col.lower():
+                            st.write(f"{i}. **{col}** - Hourly timestamps (24 rows)")
+                        else:
+                            st.write(f"{i}. **{col}** - Hourly feature values")
+                    
+                    # Provide download link for correct example
+                    if os.path.exists("example_nextday_input_correct.csv"):
+                        with open("example_nextday_input_correct.csv", "r") as f:
+                            csv_data = f.read()
+                        st.download_button(
+                            label="📥 Download Example File (Correct Format)",
+                            data=csv_data,
+                            file_name="example_nextday_input_correct.csv",
+                            mime="text/csv",
+                            help="Download this file as a template with the correct format"
+                        )
+                
                 uploaded_file = st.file_uploader(
-                    "Upload a CSV or Excel file with 24 rows of data to make a new prediction.",
+                    "Upload a CSV or Excel file with 24 rows of hourly data:",
                     type=['csv', 'xlsx']
                 )
                 
                 if uploaded_file:
                     try:
-                        # Use cached data to get target column name
-                        default_data = load_default_data_cached()
-                        if default_data is not None:
-                            target_column = default_data.columns[-1]
+                        # target_column is already defined above
+                            
+                            # Read the uploaded file first
+                            if uploaded_file.name.lower().endswith('.csv'):
+                                today_data = pd.read_csv(uploaded_file)
+                            else:
+                                today_data = pd.read_excel(uploaded_file)
+                            
+                            # Find and parse datetime column
+                            datetime_cols = [col for col in today_data.columns if any(term in col.lower() for term in ['date', 'time', 'tarih'])]
+                            if datetime_cols:
+                                datetime_col = datetime_cols[0]
+                                today_data[datetime_col] = pd.to_datetime(today_data[datetime_col])
+                                today_data = today_data.set_index(datetime_col).sort_index()
+                            
+                            # Apply the same preprocessing as training: drop pressure column if it exists
+                            pressure_col = 'Heat Exchanger Pressure Differential (Bar)'
+                            if pressure_col in today_data.columns:
+                                today_data = today_data.drop(columns=[pressure_col])
+                                st.info(f"Dropped column '{pressure_col}' to match training data format.")
+                            
+                            # Check if we have the expected columns from training
+                            default_data = load_default_data_cached()
+                            if default_data is not None:
+                                expected_cols = [col for col in default_data.columns if col != target_column]
+                                missing_cols = set(expected_cols) - set(today_data.columns)
+                                if missing_cols:
+                                    st.error(f"Missing required columns from training data: {', '.join(missing_cols)}")
+                                    st.info(f"Expected columns: {', '.join(expected_cols)}")
+                                    st.info(f"Your uploaded file has: {', '.join([col for col in today_data.columns if col != target_column])}")
+                                    st.stop()
                             
                             # Prepare input for prediction
-                            input_df, error = prepare_nextday_input(uploaded_file, target_column, window_hours=24)
+                            input_df = prepare_nextday_input(today_data, target_column, window_hours=24)
                             
-                            if error:
-                                st.error(error)
-                            else:
-                                st.write("Input Features (24-hour window):")
-                                st.dataframe(input_df.T)
+                            st.write("Input Features (24-hour window):")
+                            st.dataframe(input_df.T)
 
-                                if st.button("Predict for uploaded data"):
-                                    handle_nextday_prediction(input_df, nextday_model, nextday_scaler, nextday_feature_names)
+                            if st.button("Predict for uploaded data"):
+                                # Generate naive baselines using today's data
+                                naive_predictions = generate_naive_predictions(today_data, target_column)
+                                
+                                # Enhanced prediction with naive comparison
+                                handle_nextday_prediction_with_baselines(
+                                    input_df, nextday_model, nextday_scaler, 
+                                    nextday_feature_names, today_data, target_column, naive_predictions
+                                )
 
                     except Exception as e:
                         st.error(f"Error processing uploaded file: {e}")

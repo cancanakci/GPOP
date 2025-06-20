@@ -28,7 +28,7 @@ def get_feature_color_map(features: list) -> dict:
     color_idx = 0
     for feature in features:
         if feature == 'Gross Power (MW)':
-            color_map[feature] = '#ffffff'
+            color_map[feature] = '#00ff00'
         else:
             color_map[feature] = FEATURE_COLORS[color_idx % len(FEATURE_COLORS)]
             color_idx += 1

@@ -342,9 +342,51 @@ def apply_well_drilling_strategy(initial_future_features, initial_future_power, 
     progress_bar.empty()
     return adjusted_power, well_drilling_dates, adjusted_features
 
+def generate_naive_predictions(today_data, target_column):
+    """
+    Generate naive baseline predictions for comparison.
+    
+    Args:
+        today_data: DataFrame with today's hourly data (24 rows)
+        target_column: Name of the target column
+        
+    Returns:
+        Dictionary with different naive prediction methods
+    """
+    if target_column not in today_data.columns:
+        return {}
+    
+    today_power = today_data[target_column].values
+    
+    naive_methods = {
+        'Last Value': [today_power[-1]] * 24,  # Repeat last hour's value
+        'Daily Average': [np.mean(today_power)] * 24,  # Use today's average
+        'Same Pattern': today_power.tolist(),  # Repeat today's exact pattern
+        'Trending Last 3h': []  # Linear trend from last 3 hours
+    }
+    
+    # Calculate trending prediction based on last 3 hours
+    if len(today_power) >= 3:
+        last_3_hours = today_power[-3:]
+        # Fit linear trend
+        x = np.array([0, 1, 2])
+        y = last_3_hours
+        slope = np.polyfit(x, y, 1)[0]
+        intercept = y[-1]  # Start from last value
+        
+        trending_pred = []
+        for hour in range(24):
+            trend_value = intercept + slope * (hour + 1)
+            trending_pred.append(max(0, trend_value))  # Don't allow negative values
+        naive_methods['Trending Last 3h'] = trending_pred
+    else:
+        naive_methods['Trending Last 3h'] = [today_power[-1]] * 24
+    
+    return naive_methods
+
 def handle_nextday_prediction(input_df, model, scaler, feature_names, actuals=None):
     """
-    Handles the prediction and visualization for a 24-hour next-day forecast.
+    Handles the prediction and visualization for a 24-hour next-day forecast with naive baselines.
 
     Args:
         input_df (pd.DataFrame): DataFrame containing the input features for one prediction.
@@ -358,35 +400,41 @@ def handle_nextday_prediction(input_df, model, scaler, feature_names, actuals=No
         input_scaled = scaler.transform(input_df)
         input_scaled_df = pd.DataFrame(input_scaled, columns=input_df.columns)
 
-        # Make predictions for each hour
-        predictions = []
+        # Make XGBoost predictions for each hour
+        xgb_predictions = []
         for hour in range(24):
             pred = model[hour].predict(input_scaled_df)[0]
-            predictions.append(pred)
+            xgb_predictions.append(pred)
 
-        # --- Display Results ---
+        # Generate naive predictions for comparison
+        # We need to reconstruct today's data from the input features
+        # The input_df contains engineered features, we need the original hourly data
         st.subheader("Next-Day Prediction Results")
-
+        
         # Create results DataFrame
         prediction_date = pd.to_datetime(input_df.index[0]) + pd.Timedelta(days=1)
         result_hours = pd.date_range(start=prediction_date.date(), periods=24, freq='H')
         
         results_df = pd.DataFrame({
             'Hour': result_hours,
-            'Predicted Power (MW)': predictions
+            'XGBoost Prediction (MW)': xgb_predictions
         })
 
+        # Try to get naive predictions if we can access the original data
+        # This requires the original today's data to be passed somehow
+        # For now, let's show a simplified version
+        
         if actuals is not None:
             results_df['Actual Power (MW)'] = actuals.values
-            results_df['Error (MW)'] = results_df['Predicted Power (MW)'] - results_df['Actual Power (MW)']
+            results_df['XGBoost Error (MW)'] = results_df['XGBoost Prediction (MW)'] - results_df['Actual Power (MW)']
 
-        # Plot results
+        # --- Main Prediction Plot ---
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=results_df['Hour'],
-            y=results_df['Predicted Power (MW)'],
+            y=results_df['XGBoost Prediction (MW)'],
             mode='lines+markers',
-            name='Predicted',
+            name='XGBoost Model',
             line=dict(color='#2ca02c', width=3) # Green
         ))
         
@@ -400,26 +448,223 @@ def handle_nextday_prediction(input_df, model, scaler, feature_names, actuals=No
             ))
 
         fig.update_layout(
-            title=f'Forecast for {prediction_date.strftime("%Y-%m-%d")}',
+            title=f'Next-Day Forecast for {prediction_date.strftime("%Y-%m-%d")}',
             xaxis_title='Hour',
             yaxis_title='Gross Power (MW)',
-            hovermode='x unified'
+            hovermode='x unified',
+            height=500
         )
         
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.write("**Prediction Summary:**")
-            st.metric("Average Predicted Power", f"{np.mean(predictions):.2f} MW")
-            st.metric("Peak Power", f"{np.max(predictions):.2f} MW")
-            st.metric("Minimum Power", f"{np.min(predictions):.2f} MW")
-            if actuals is not None:
-                rmse = np.sqrt(np.mean(results_df['Error (MW)']**2))
-                st.metric("RMSE vs Actuals", f"{rmse:.2f} MW")
+        st.plotly_chart(fig, use_container_width=True)
 
-        st.dataframe(results_df.set_index('Hour').round(2))
+        # --- Model Performance Summary ---
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Average Predicted Power", f"{np.mean(xgb_predictions):.2f} MW")
+        with col2:
+            st.metric("Peak Power", f"{np.max(xgb_predictions):.2f} MW")
+        with col3:
+            st.metric("Minimum Power", f"{np.min(xgb_predictions):.2f} MW")
+
+        if actuals is not None:
+            xgb_rmse = np.sqrt(np.mean(results_df['XGBoost Error (MW)']**2))
+            xgb_mae = np.mean(np.abs(results_df['XGBoost Error (MW)']))
+            
+            st.subheader("Model Performance vs Actuals")
+            perf_col1, perf_col2 = st.columns(2)
+            with perf_col1:
+                st.metric("XGBoost RMSE", f"{xgb_rmse:.2f} MW")
+            with perf_col2:
+                st.metric("XGBoost MAE", f"{xgb_mae:.2f} MW")
+
+        # --- Detailed Results Table ---
+        st.subheader("Detailed Hourly Results")
+        display_df = results_df.set_index('Hour').round(2)
+        st.dataframe(display_df, use_container_width=True)
+
+        # --- Download Results ---
+        csv_data = results_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Prediction Results",
+            data=csv_data,
+            file_name=f"nextday_prediction_{prediction_date.strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
+        st.exception(e)
+
+def handle_nextday_prediction_with_baselines(input_df, model, scaler, feature_names, today_data, target_column, naive_predictions, actuals=None):
+    """
+    Enhanced next-day prediction with naive baseline comparisons.
+    """
+    try:
+        # Scale the input features
+        input_scaled = scaler.transform(input_df)
+        input_scaled_df = pd.DataFrame(input_scaled, columns=input_df.columns)
+
+        # Make XGBoost predictions for each hour
+        xgb_predictions = []
+        for hour in range(24):
+            pred = model[hour].predict(input_scaled_df)[0]
+            xgb_predictions.append(pred)
+
+        # Create results DataFrame
+        # Use today's data for correct date
+        if hasattr(today_data, 'index') and isinstance(today_data.index, pd.DatetimeIndex):
+            today_date = today_data.index[0].date()
+            prediction_date = pd.to_datetime(today_date) + pd.Timedelta(days=1)
+        else:
+            # Fallback: use current date + 1 day
+            prediction_date = pd.Timestamp.now().normalize() + pd.Timedelta(days=1)
+        
+        result_hours = pd.date_range(start=prediction_date.date(), periods=24, freq='H')
+        
+        results_df = pd.DataFrame({
+            'Hour': result_hours,
+            'XGBoost Prediction (MW)': xgb_predictions
+        })
+
+        # Add naive predictions
+        for method_name, predictions in naive_predictions.items():
+            if len(predictions) == 24:
+                results_df[f'{method_name} (MW)'] = predictions
+
+        if actuals is not None:
+            results_df['Actual Power (MW)'] = actuals.values
+
+        st.subheader("Next-Day Prediction Results")
+
+        # --- Today's Pattern vs Tomorrow's Predictions ---
+        st.subheader("Today's Pattern vs Tomorrow's Predictions")
+        
+        today_hours = pd.date_range(start=today_data.index[0].date(), periods=24, freq='H')
+        today_power = today_data[target_column].values
+        
+        fig_comparison = go.Figure()
+        
+        # XGBoost prediction
+        fig_comparison.add_trace(go.Scatter(
+            x=list(range(24)),
+            y=xgb_predictions,
+            mode='lines+markers',
+            name='XGBoost Model',
+            line=dict(color='#2ca02c', width=3)
+        ))
+        
+        # Naive predictions
+        colors = ['#ff7f0e', '#d62728', '#9467bd', '#8c564b']
+        for i, (method_name, predictions) in enumerate(naive_predictions.items()):
+            if len(predictions) == 24:
+                fig_comparison.add_trace(go.Scatter(
+                    x=list(range(24)),
+                    y=predictions,
+                    mode='lines+markers',
+                    name=f'Naive: {method_name}',
+                    line=dict(color=colors[i % len(colors)], width=2, dash='dash')
+                ))
+
+        if actuals is not None:
+            fig_comparison.add_trace(go.Scatter(
+                x=list(range(24)),
+                y=actuals.values,
+                mode='lines+markers',
+                name='Actual Tomorrow',
+                line=dict(color='#009cfa', width=3)
+            ))
+
+        fig_comparison.update_layout(
+            title=f'Prediction Comparison for {prediction_date.strftime("%Y-%m-%d")}',
+            xaxis_title='Hour of Day',
+            yaxis_title='Gross Power (MW)',
+            hovermode='x unified',
+            height=600
+        )
+        
+        st.plotly_chart(fig_comparison, use_container_width=True)
+
+        # --- Performance Comparison ---
+        if actuals is not None:
+            st.subheader("Model Performance Comparison")
+            
+            # Calculate metrics for each method
+            performance_data = []
+            
+            # XGBoost performance
+            xgb_rmse = np.sqrt(np.mean((np.array(xgb_predictions) - actuals.values)**2))
+            xgb_mae = np.mean(np.abs(np.array(xgb_predictions) - actuals.values))
+            performance_data.append({
+                'Method': 'XGBoost Model',
+                'RMSE (MW)': round(xgb_rmse, 3),
+                'MAE (MW)': round(xgb_mae, 3),
+                'Type': 'ML Model'
+            })
+            
+            # Naive baselines performance
+            for method_name, predictions in naive_predictions.items():
+                if len(predictions) == 24:
+                    rmse = np.sqrt(np.mean((np.array(predictions) - actuals.values)**2))
+                    mae = np.mean(np.abs(np.array(predictions) - actuals.values))
+                    performance_data.append({
+                        'Method': f'Naive: {method_name}',
+                        'RMSE (MW)': round(rmse, 3),
+                        'MAE (MW)': round(mae, 3),
+                        'Type': 'Baseline'
+                    })
+            
+            # Display performance table
+            perf_df = pd.DataFrame(performance_data).sort_values('RMSE (MW)')
+            
+            # Highlight best performance
+            best_rmse = perf_df['RMSE (MW)'].min()
+            best_mae = perf_df['MAE (MW)'].min()
+            
+            st.write("**Performance Ranking (by RMSE):**")
+            st.dataframe(
+                perf_df.style.format({'RMSE (MW)': '{:.3f}', 'MAE (MW)': '{:.3f}'})
+                .highlight_min(subset=['RMSE (MW)'], color='lightgreen')
+                .highlight_min(subset=['MAE (MW)'], color='lightblue'),
+                use_container_width=True
+            )
+            
+            # Performance insights
+            xgb_rank = perf_df[perf_df['Method'] == 'XGBoost Model'].index[0] + 1
+            total_methods = len(perf_df)
+            
+            if xgb_rank == 1:
+                st.success(f"🎉 **XGBoost model performs best** (rank {xgb_rank}/{total_methods})")
+            elif xgb_rank <= total_methods // 2:
+                st.info(f"✅ **XGBoost model performs well** (rank {xgb_rank}/{total_methods})")
+            else:
+                st.warning(f"⚠️ **XGBoost model underperforms** (rank {xgb_rank}/{total_methods}) - consider retraining or using a simpler baseline")
+
+        # --- Summary Statistics ---
+        st.subheader("Prediction Summary")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("XGBoost Average", f"{np.mean(xgb_predictions):.2f} MW")
+            st.metric("Today's Average", f"{np.mean(today_power):.2f} MW")
+        with col2:
+            st.metric("XGBoost Peak", f"{np.max(xgb_predictions):.2f} MW")
+            st.metric("Today's Peak", f"{np.max(today_power):.2f} MW")
+        with col3:
+            st.metric("XGBoost Min", f"{np.min(xgb_predictions):.2f} MW")
+            st.metric("Today's Min", f"{np.min(today_power):.2f} MW")
+
+        # --- Detailed Results Table ---
+        st.subheader("Detailed Hourly Results")
+        display_df = results_df.set_index('Hour').round(2)
+        st.dataframe(display_df, use_container_width=True)
+
+        # --- Download Results ---
+        csv_data = results_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download All Prediction Results",
+            data=csv_data,
+            file_name=f"nextday_prediction_comparison_{prediction_date.strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
 
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
