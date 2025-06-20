@@ -3,7 +3,7 @@ from sklearn.model_selection import train_test_split, KFold, cross_val_score, Gr
 from sklearn.metrics import mean_squared_error, r2_score, make_scorer
 from sklearn.preprocessing import StandardScaler
 import joblib
-from data_processing import load_and_parse
+from data_processing import load_and_parse, create_nextday_features
 import os
 import numpy as np
 import xgboost as xgb
@@ -40,7 +40,7 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     if datetime_col is None and start_date is None:
         raise ValueError("Either 'datetime_col' or 'start_date' must be provided to train_model.")
 
-    df = load_and_parse(data_source, datetime_col=datetime_col, start_date=start_date, freq=freq)
+    df = load_and_parse(data_source, datetime_col=datetime_col, start_date=start_date, freq=freq, silent=False)
 
     # --- Preprocessing (Interpolation) ---
     # Replicate the simple interpolation from the old preprocess_data function
@@ -225,6 +225,203 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
         json.dump(metrics, f, indent=2)
     
     logger.info(f"Model metrics saved to {metrics_path}")
+    
+    return metrics
+
+def train_nextday_model(data_source, models_dir, target_column=None, datetime_col=None, start_date=None, freq=None, window_hours=24, test_size=0.2):
+    """
+    Trains a next-day prediction model using sliding windows and engineered features.
+    
+    Args:
+        data_source: Path to the data file
+        models_dir: Directory to save model files
+        target_column: Name of the target column
+        datetime_col: Name of the datetime column
+        start_date: Start date if no datetime column
+        freq: Frequency of the data
+        window_hours: Number of hours to use as input window
+        test_size: Fraction of data to use for testing
+    
+    Returns:
+        Dictionary containing training metrics
+    """
+    logger.info("Starting next-day prediction model training...")
+    
+    # Load and parse data
+    if datetime_col is None and start_date is None:
+        raise ValueError("Either 'datetime_col' or 'start_date' must be provided.")
+    
+    df = load_and_parse(data_source, datetime_col=datetime_col, start_date=start_date, freq=freq, silent=False)
+    
+    # Ensure hourly frequency
+    if df.index.freq != 'H' and pd.infer_freq(df.index) != 'H':
+        logger.info("Resampling data to hourly frequency...")
+        df = df.resample('H').mean().interpolate()
+    
+    # If target_column is not specified, use the last column
+    if target_column is None:
+        target_column = df.columns[-1]
+    
+    if target_column not in df.columns:
+        raise ValueError(f"Target column '{target_column}' not found in data.")
+    
+    # --- Feature Engineering ---
+    # Drop the specified column if it exists
+    pressure_col = 'Heat Exchanger Pressure Differential (Bar)'
+    if pressure_col in df.columns:
+        df = df.drop(columns=[pressure_col])
+        logger.info(f"Dropped column: {pressure_col}")
+
+    # Create next-day features
+    logger.info("Creating next-day prediction features...")
+    X, y = create_nextday_features(df, target_column, window_hours, silent=False)
+    
+    if len(X) == 0:
+        raise ValueError("No samples could be created. Check data length and window size.")
+    
+    # Split the data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Convert back to DataFrames
+    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
+    
+    logger.info(f"Training data shape: {X_train_scaled.shape}")
+    logger.info(f"Test data shape: {X_test_scaled.shape}")
+    
+    # Train multiple models (one for each hour of the next day)
+    models = []
+    predictions = []
+    metrics_per_hour = []
+    
+    logger.info("Training 24 models (one for each hour of the next day)...")
+    
+    for hour in range(24):
+        logger.info(f"Training model for hour {hour}...")
+        
+        # Get target for this hour
+        y_train_hour = y_train.iloc[:, hour]
+        y_test_hour = y_test.iloc[:, hour]
+        
+        # Train XGBoost model for this hour
+        model = xgb.XGBRegressor(
+            objective='reg:squarederror',
+            n_estimators=200,
+            learning_rate=0.1,
+            max_depth=6,
+            min_child_weight=3,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1,
+            eval_metric='rmse',
+            early_stopping_rounds=30
+        )
+        
+        # Train with early stopping
+        model.fit(
+            X_train_scaled, y_train_hour,
+            eval_set=[(X_train_scaled, y_train_hour), (X_test_scaled, y_test_hour)],
+            verbose=False
+        )
+        
+        # Make predictions
+        y_pred_hour = model.predict(X_test_scaled)
+        
+        # Calculate metrics
+        mse = mean_squared_error(y_test_hour, y_pred_hour)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(y_test_hour, y_pred_hour)
+        
+        models.append(model)
+        predictions.append(y_pred_hour)
+        metrics_per_hour.append({
+            'hour': hour,
+            'mse': mse,
+            'rmse': rmse,
+            'r2': r2
+        })
+        
+        logger.info(f"Hour {hour}: RMSE={rmse:.4f}, R²={r2:.4f}")
+    
+    # Calculate overall metrics
+    y_test_flat = y_test.values.flatten()
+    y_pred_flat = np.array(predictions).T.flatten()
+    
+    overall_mse = mean_squared_error(y_test_flat, y_pred_flat)
+    overall_rmse = np.sqrt(overall_mse)
+    overall_r2 = r2_score(y_test_flat, y_pred_flat)
+    
+    logger.info(f"Overall performance: RMSE={overall_rmse:.4f}, R²={overall_r2:.4f}")
+
+    # --- Find and save the best test example ---
+    y_pred_test = np.array(predictions).T  # Transpose to have shape (n_samples, 24)
+    
+    best_rmse = float('inf')
+    best_example = {}
+
+    for i in range(len(X_test)):
+        actuals = y_test.iloc[i].values
+        preds = y_pred_test[i]
+        
+        # Ensure we have a full 24-hour forecast to evaluate
+        if len(actuals) == 24 and len(preds) == 24:
+            rmse = np.sqrt(mean_squared_error(actuals, preds))
+            
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_example = {
+                    'input_features': X_test.iloc[i].to_dict(),
+                    'actual_values': actuals.tolist(),
+                    'predicted_values': preds.tolist(),
+                    'rmse': rmse,
+                    'input_timestamp': X_test.index[i]
+                }
+
+    if best_example:
+        logger.info(f"Best test example found with RMSE: {best_example['rmse']:.4f}")
+        example_path = os.path.join(models_dir, "nextday_best_example.pkl")
+        joblib.dump(best_example, example_path)
+        logger.info(f"Best test example saved to {example_path}")
+    
+    # Save models and scaler
+    model_path = os.path.join(models_dir, "nextday_model.pkl")
+    scaler_path = os.path.join(models_dir, "nextday_scaler.pkl")
+    feature_names_path = os.path.join(models_dir, "nextday_feature_names.pkl")
+    metrics_path = os.path.join(models_dir, "nextday_metrics.json")
+    
+    joblib.dump(models, model_path)
+    joblib.dump(scaler, scaler_path)
+    joblib.dump(X.columns.tolist(), feature_names_path)
+    
+    # Save metrics
+    metrics = {
+        'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S"),
+        'model_type': 'NextDay_XGBoost',
+        'window_hours': window_hours,
+        'overall_metrics': {
+            'mse': float(overall_mse),
+            'rmse': float(overall_rmse),
+            'r2': float(overall_r2)
+        },
+        'hourly_metrics': metrics_per_hour,
+        'model_path': model_path,
+        'scaler_path': scaler_path,
+        'feature_names_path': feature_names_path,
+        'best_test_example_rmse': best_example.get('rmse') # Add best RMSE to metrics
+    }
+    
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+    
+    logger.info(f"Next-day prediction model saved to {model_path}")
+    logger.info(f"Scaler saved to {scaler_path}")
+    logger.info(f"Metrics saved to {metrics_path}")
     
     return metrics
 

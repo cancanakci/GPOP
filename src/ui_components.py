@@ -10,6 +10,29 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import colorsys
+import numpy as np
+import scipy.stats as stats
+
+# Consistent color palette for features across the application (user's preferred colors + blue)
+FEATURE_COLORS = [
+    '#6a00fa',  # purple
+    '#ff0e9a',  # pink
+    '#ffa10a',  # orange
+    '#ff436a',  # red
+    '#009cfa',  # blue
+]
+
+def get_feature_color_map(features: list) -> dict:
+    """Creates a consistent color mapping for a list of features. 'Gross Power (MW)' is always white."""
+    color_map = {}
+    color_idx = 0
+    for feature in features:
+        if feature == 'Gross Power (MW)':
+            color_map[feature] = '#ffffff'
+        else:
+            color_map[feature] = FEATURE_COLORS[color_idx % len(FEATURE_COLORS)]
+            color_idx += 1
+    return color_map
 
 def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None, warning_ranges=None, input_df=None):
     """Displays input data warnings based on feature values being outside training data ranges."""
@@ -35,59 +58,141 @@ def display_input_warnings(yellow_warnings, red_warnings, warning_flags_df=None,
         st.info(f"**Warning Summary**: {red_warning_rows} rows have validation warnings, {yellow_warning_rows} rows have quality warnings out of {total_rows} total rows.")
 
 def display_data_visualizations(training_data, model=None):
-    """Display various visualizations for the test data only."""
+    """Display various visualizations for the training and test data with comprehensive dataset information."""
     if training_data is None:
         return
     
-    X_test = training_data['X_test']
-    y_test = training_data['y_test']
+    X_train = training_data.get('X_train')
+    y_train = training_data.get('y_train')
+    X_test = training_data.get('X_test')
+    y_test = training_data.get('y_test')
     feature_names = training_data['feature_names']
     target_column = training_data.get('target_column', 'Target')
     
-    if X_test is None or len(X_test) == 0:
-        st.info("No test set available. Visualizations will not be shown.")
-        return
+    st.header("Model & Training Data Exploration")
     
-    df_test = X_test.copy()
-    df_test[target_column] = y_test.values
+    # Dataset Overview Section
+    st.subheader("Dataset Overview")
     
-    st.subheader("Test Set Data")
+    # Create overview metrics
+    col1, col2, col3, col4 = st.columns(4)
     
+    with col1:
+        if X_train is not None:
+            st.metric("Training Samples", len(X_train))
+        else:
+            st.metric("Training Samples", "N/A")
+    
+    with col2:
+        if X_test is not None and len(X_test) > 0:
+            st.metric("Test Samples", len(X_test))
+        else:
+            st.metric("Test Samples", "N/A")
+    
+    with col3:
+        if X_train is not None:
+            st.metric("Features", len(feature_names))
+        else:
+            st.metric("Features", "N/A")
+    
+    with col4:
+        if X_train is not None:
+            st.metric("Target Variable", target_column)
+        else:
+            st.metric("Target Variable", "N/A")
+    
+    # Time Series Information (if available)
+    if X_train is not None and hasattr(X_train, 'index') and isinstance(X_train.index, pd.DatetimeIndex):
+        st.subheader("Time Series Information")
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = X_train.index.min()
+            end_date = X_train.index.max()
+            st.metric("Data Start Date", start_date.strftime('%Y-%m-%d %H:%M'))
+            st.metric("Data End Date", end_date.strftime('%Y-%m-%d %H:%M'))
+        with col2:
+            time_span = end_date - start_date
+            st.metric("Total Time Span", f"{time_span.days} days")
+            st.metric("Data Frequency", str(X_train.index.freq) if X_train.index.freq else "Irregular")
+    
+    # Data Quality Information
+    st.subheader("Data Quality Information")
+    if X_train is not None:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Training Set Statistics:**")
+            if y_train is not None:
+                train_stats = pd.DataFrame({
+                    'Feature': [target_column] + feature_names,
+                    'Min': [y_train.min()] + [X_train[col].min() for col in feature_names],
+                    'Max': [y_train.max()] + [X_train[col].max() for col in feature_names],
+                    'Mean': [y_train.mean()] + [X_train[col].mean() for col in feature_names],
+                    'Std': [y_train.std()] + [X_train[col].std() for col in feature_names]
+                })
+                st.dataframe(train_stats, use_container_width=True)
+        with col2:
+            if X_test is not None and len(X_test) > 0:
+                st.write("**Test Set Statistics:**")
+                test_stats = pd.DataFrame({
+                    'Feature': [target_column] + feature_names,
+                    'Min': [y_test.min()] + [X_test[col].min() for col in feature_names],
+                    'Max': [y_test.max()] + [X_test[col].max() for col in feature_names],
+                    'Mean': [y_test.mean()] + [X_test[col].mean() for col in feature_names],
+                    'Std': [y_test.std()] + [X_test[col].std() for col in feature_names]
+                })
+                st.dataframe(test_stats, use_container_width=True)
+            else:
+                st.info("No test set available for comparison.")
+    # Feature Importance (if model is available)
     if model is not None and hasattr(model, 'feature_importances_'):
+        st.subheader("Feature Importance")
         importances = model.feature_importances_
         feature_importance_df = pd.DataFrame({
             'Feature': feature_names,
             'Importance': importances
         }).sort_values('Importance', ascending=False)
-
         fig = px.bar(feature_importance_df, 
                    x='Feature', 
                    y='Importance',
                    title='Feature Importance',
                    labels={'Importance': 'Relative Importance'})
-        
         fig.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
-
-    corr = df_test.corr()
-    fig = px.imshow(corr, text_auto=True, title='Test Set Feature Correlation Heatmap')
-    fig.update_layout(
-        xaxis_showgrid=False,
-        yaxis_showgrid=False,
-        xaxis_nticks=len(corr.columns),
-        yaxis_nticks=len(corr.index)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    for col in df_test.columns:
-        fig = make_subplots(rows=1, cols=2, 
-                          subplot_titles=(f'{col} Distribution', f'{col} Box Plot'))
-        
-        fig.add_trace(go.Histogram(x=df_test[col], name='Histogram'), row=1, col=1)
-        fig.add_trace(go.Box(y=df_test[col], name='Box Plot'), row=1, col=2)
-        
-        fig.update_layout(height=400, showlegend=False, title_text=f'{col} Test Set Analysis')
+    # Correlation Analysis
+    st.subheader("Feature Correlation Analysis")
+    if X_train is not None:
+        # Create combined dataframe for correlation analysis
+        df_train = X_train.copy()
+        if y_train is not None:
+            df_train[target_column] = y_train.values
+        corr = df_train.corr()
+        fig = px.imshow(corr, text_auto=True, title='Feature Correlation Heatmap (Training Data)')
+        fig.update_layout(
+            xaxis_showgrid=False,
+            yaxis_showgrid=False,
+            xaxis_nticks=len(corr.columns),
+            yaxis_nticks=len(corr.index)
+        )
         st.plotly_chart(fig, use_container_width=True)
+    # Individual Feature Analysis
+    st.subheader("Individual Feature Analysis")
+    # Use training data for detailed analysis
+    if X_train is not None and y_train is not None:
+        df_analysis = X_train.copy()
+        df_analysis[target_column] = y_train.values
+        
+        feature_color_map = get_feature_color_map(df_analysis.columns)
+
+        for col in df_analysis.columns:
+            fig = make_subplots(rows=1, cols=2, 
+                              subplot_titles=(f'{col} Distribution', f'{col} Box Plot'))
+            
+            color = feature_color_map.get(col, '#1f77b4')
+            fig.add_trace(go.Histogram(x=df_analysis[col], name='Histogram', marker_color=color), row=1, col=1)
+            fig.add_trace(go.Box(y=df_analysis[col], name='Box Plot', marker_color=color), row=1, col=2)
+            
+            fig.update_layout(height=400, showlegend=False, title_text=f'{col} Analysis (Training Data)')
+            st.plotly_chart(fig, use_container_width=True)
 
 def display_prediction_visualizations(results_df, target_column='Target'):
     """Display visualizations for batch prediction results."""
@@ -177,20 +282,13 @@ def display_model_metrics(metrics):
     if timestamp_str:
         st.sidebar.write(f"Training Date: {datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S').strftime('%Y-%m-%d %H:%M:%S')}")
 
-    st.sidebar.subheader("Performance Metrics")
+    st.sidebar.subheader("Test Set Performance")
 
-    # Always use test set metrics
+    # Only show test set metrics
     test_metrics = metrics.get('metrics', {})
-    st.sidebar.write("Test Set Performance:")
     st.sidebar.write(f"R² Score: {test_metrics.get('r2', 0.0):.4f}")
     st.sidebar.write(f"RMSE: {test_metrics.get('rmse', 0.0):.4f}")
     st.sidebar.write(f"MSE: {test_metrics.get('mse', 0.0):.4f}")
-
-    cv_metrics = metrics.get('metrics', {}).get('cv_metrics', {})
-    if cv_metrics:
-        st.sidebar.write("Cross-validation Performance:")
-        st.sidebar.write(f"Mean R²: {cv_metrics.get('r2_mean', 0.0):.4f} (±{cv_metrics.get('r2_std', 0.0) * 2:.4f})")
-        st.sidebar.write(f"Mean RMSE: {cv_metrics.get('rmse_mean', 0.0):.4f} (±{cv_metrics.get('rmse_std', 0.0) * 2:.4f})")
 
     # Only plot actual vs predicted for the test set
     actual = metrics.get('actual')
@@ -254,15 +352,16 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
     )
 
     # Define a color palette for different features
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    all_plot_features = [target_col] + features if target_col else features
+    feature_color_map = get_feature_color_map(all_plot_features)
     
     # Calculate split date for historical vs projected data
-    split_date = plot_data.index[-int(years * 365.25 * (plot_data.index.freq / pd.Timedelta(days=1)))] if len(plot_data) > 0 else pd.Timestamp.now()
+    split_date = plot_data.index[-int(years * 365.25 * (pd.to_timedelta(plot_data.index.freq) / pd.Timedelta(days=1)))] if len(plot_data) > 0 and plot_data.index.freq else pd.Timestamp.now()
 
     # Plot target variable
     historical_target = plot_data[target_col][:split_date]
     future_target = plot_data[target_col][split_date:]
-    base_color = colors[0]
+    base_color = feature_color_map.get(target_col, '#1f77b4')
     light_color = lighten_color(base_color, 0.5)
     fig.add_trace(go.Scatter(
         x=historical_target.index, 
@@ -283,8 +382,7 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
         future_feature = plot_data[feature][split_date:]
         
         # Use different color for each feature, cycling through the palette
-        color_idx = (i - 1) % len(colors)
-        base_color = colors[color_idx]
+        base_color = feature_color_map.get(feature, '#1f77b4')
         light_color = lighten_color(base_color, 0.5)
         
         # Historical data (solid line, base color)
@@ -309,3 +407,167 @@ def plot_scenario(scenario_data, years, target_col=None, feature_trends=None):
         showlegend=True
     )
     st.plotly_chart(fig, use_container_width=True)
+
+def display_time_series_analysis(training_data, model=None, label_prefix=""):
+    """Display comprehensive time series analysis of the training data."""
+    if training_data is None:
+        st.warning("No training data available for time series analysis.")
+        return
+    # Check if we have time series data with datetime index
+    if 'X_train' not in training_data or training_data['X_train'] is None:
+        st.warning("Training data not available for time series analysis.")
+        return
+    X_train = training_data['X_train']
+    y_train = training_data['y_train']
+    target_column = training_data.get('target_column', 'Target')
+    # Create a combined dataframe with target
+    df_analysis = X_train.copy()
+    df_analysis[target_column] = y_train.values
+    # Check if we have a datetime index
+    if not isinstance(df_analysis.index, pd.DatetimeIndex):
+        st.warning("Data does not have a datetime index. Time series analysis requires time-indexed data.")
+        return
+    st.header("Time Series Analysis")
+    # Basic time series information
+    st.subheader("Data Overview")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Observations", len(df_analysis))
+    with col2:
+        st.metric("Time Span", f"{(df_analysis.index.max() - df_analysis.index.min()).days} days")
+    with col3:
+        st.metric("Data Frequency", str(df_analysis.index.freq) if df_analysis.index.freq else "Irregular")
+    # Create a consistent color map for all features
+    feature_color_map = get_feature_color_map(df_analysis.columns)
+    # Time series plots for all features
+    st.subheader("Time Series Plots")
+    # Target variable time series
+    fig_target = go.Figure()
+    fig_target.add_trace(go.Scatter(
+        x=df_analysis.index,
+        y=df_analysis[target_column],
+        mode='lines',
+        name=target_column,
+        line=dict(color=feature_color_map.get(target_column), width=2)
+    ))
+    fig_target.update_layout(
+        title=f'{label_prefix}{target_column} over time',
+        xaxis_title='Time',
+        yaxis_title=target_column,
+        height=400
+    )
+    st.plotly_chart(fig_target, use_container_width=True)
+    # Feature time series plots
+    features = [col for col in df_analysis.columns if col != target_column]
+    for feature in features:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_analysis.index,
+            y=df_analysis[feature],
+            mode='lines',
+            name=feature,
+            line=dict(width=1.5, color=feature_color_map.get(feature))
+        ))
+        fig.update_layout(
+            title=f'{label_prefix}{feature} over time',
+            xaxis_title='Time',
+            yaxis_title=feature,
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    # Trend Analysis
+    st.subheader("Trend Analysis")
+    # Linear trend analysis for each feature
+    trend_results = {}
+    for feature in df_analysis.columns:
+        y = df_analysis[feature].values
+        x = np.arange(len(y))
+        # Fit linear trend
+        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+        trend_results[feature] = {
+            'slope': slope,
+            'intercept': intercept,
+            'r_squared': r_value**2,
+            'p_value': p_value,
+            'trend_direction': 'Increasing' if slope > 0 else 'Decreasing' if slope < 0 else 'No trend'
+        }
+    # Display trend results
+    trend_df = pd.DataFrame(trend_results).T
+    trend_df['slope'] = trend_df['slope'].astype(float).round(6)
+    trend_df['r_squared'] = trend_df['r_squared'].astype(float).round(4)
+    trend_df['p_value'] = trend_df['p_value'].astype(float).round(6)
+    st.dataframe(trend_df[['slope', 'r_squared', 'p_value', 'trend_direction']])
+    # Seasonality Analysis
+    st.subheader("Seasonality Analysis")
+    # Check for seasonality in target variable
+    if len(df_analysis) > 24:  # Need sufficient data for seasonality analysis
+        # Monthly seasonality
+        monthly_avg = df_analysis[target_column].groupby(df_analysis.index.month).mean()
+        fig_monthly = px.bar(
+            x=monthly_avg.index,
+            y=monthly_avg.values,
+            title=f'Monthly Seasonality - {label_prefix}{target_column}',
+            labels={'x': 'Month', 'y': f'Average {target_column}'}
+        )
+        st.plotly_chart(fig_monthly, use_container_width=True)
+        # Hourly seasonality (if hourly data)
+        if df_analysis.index.freq and 'H' in str(df_analysis.index.freq):
+            hourly_avg = df_analysis[target_column].groupby(df_analysis.index.hour).mean()
+            fig_hourly = px.bar(
+                x=hourly_avg.index,
+                y=hourly_avg.values,
+                title=f'Hourly Seasonality - {label_prefix}{target_column}',
+                labels={'x': 'Hour', 'y': f'Average {target_column}'}
+            )
+            st.plotly_chart(fig_hourly, use_container_width=True)
+
+def clean_time_series_data(
+    df: pd.DataFrame,
+    outlier_method: str = 'iqr',
+    outlier_threshold: float = 1.5,
+    rolling_window: int = 3
+) -> (pd.DataFrame, list):
+    """
+    Cleans a time series DataFrame by:
+    - Removing outliers (IQR or std method, replacing with NaN)
+    - Filling missing values (forward fill, then backward fill)
+    - Optionally smoothing with a rolling mean
+    Returns (cleaned DataFrame, cleaning summary list)
+    """
+    df_clean = df.copy()
+    cleaning_steps = []
+    for col in df_clean.select_dtypes(include=[np.number]).columns:
+        if outlier_method == 'iqr':
+            Q1 = df_clean[col].quantile(0.25)
+            Q3 = df_clean[col].quantile(0.75)
+            IQR = Q3 - Q1
+            lower = Q1 - outlier_threshold * IQR
+            upper = Q3 + outlier_threshold * IQR
+            outliers = (df_clean[col] < lower) | (df_clean[col] > upper)
+            n_outliers = outliers.sum()
+            df_clean.loc[outliers, col] = np.nan
+            cleaning_steps.append(f"Removed {n_outliers} outliers in '{col}' using IQR method (threshold={outlier_threshold})")
+        elif outlier_method == 'std':
+            mean = df_clean[col].mean()
+            std = df_clean[col].std()
+            lower = mean - outlier_threshold * std
+            upper = mean + outlier_threshold * std
+            outliers = (df_clean[col] < lower) | (df_clean[col] > upper)
+            n_outliers = outliers.sum()
+            df_clean.loc[outliers, col] = np.nan
+            cleaning_steps.append(f"Removed {n_outliers} outliers in '{col}' using std method (threshold={outlier_threshold})")
+        # Fill missing values
+        n_missing = df_clean[col].isna().sum()
+        df_clean[col] = df_clean[col].ffill().bfill()
+        if n_missing > 0:
+            cleaning_steps.append(f"Filled {n_missing} missing values in '{col}' with forward/backward fill")
+        # Optional: smooth with rolling mean
+        if rolling_window > 1:
+            df_clean[col] = df_clean[col].rolling(window=rolling_window, min_periods=1, center=True).mean()
+            cleaning_steps.append(f"Applied rolling mean smoothing to '{col}' (window={rolling_window})")
+    return df_clean, cleaning_steps
+
+def display_cleaning_summary(cleaning_steps: list):
+    """Display a summary of cleaning steps in the UI."""
+    if cleaning_steps:
+        st.info("**Data Cleaning Summary:**\n" + "\n".join(f"- {step}" for step in cleaning_steps))

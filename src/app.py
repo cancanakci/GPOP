@@ -15,11 +15,43 @@ import json
 import plotly.graph_objects as go
 
 # Internal modules
-from data_processing import load_and_parse, enforce_frequency, sanity_checks
+from data_processing import load_and_parse, enforce_frequency, sanity_checks, prepare_nextday_input, create_nextday_features
 from file_utils import load_latest_model_files, cleanup_old_models, load_default_model
-from ui_components import display_data_visualizations, display_model_metrics, plot_scenario
+from ui_components import display_data_visualizations, display_model_metrics, plot_scenario, display_time_series_analysis, clean_time_series_data, display_cleaning_summary
 from core import load_selected_model_components, handle_prediction_workflow, create_scenario_dataframe, apply_well_drilling_strategy
-from train import train_model
+from train import train_model, train_nextday_model
+
+@st.cache_data
+def load_default_data_cached():
+    """Cache the default data loading to avoid redundant processing."""
+    try:
+        peek_df = pd.read_excel("data/default_data.xlsx", nrows=0)
+        datetime_col = peek_df.columns[0]
+        return load_and_parse("data/default_data.xlsx", datetime_col=datetime_col, silent=True)
+    except Exception as e:
+        st.error(f"Error loading default data: {e}")
+        return None
+
+@st.cache_data
+def load_default_training_data_cached():
+    """Cache the default training data loading."""
+    try:
+        return joblib.load(os.path.join("models", "default_training_data.pkl"))
+    except Exception as e:
+        st.error(f"Error loading default training data: {e}")
+        return None
+
+@st.cache_data
+def load_default_model_components_cached():
+    """Cache the default model components loading."""
+    try:
+        model = joblib.load(os.path.join("models", "default_model.pkl"))
+        scaler = joblib.load(os.path.join("models", "default_scaler.pkl"))
+        feature_names = joblib.load(os.path.join("models", "default_feature_names.pkl"))
+        return model, scaler, feature_names
+    except Exception as e:
+        st.error(f"Error loading default model components: {e}")
+        return None, None, None
 
 def main():
     """Main function to run the Streamlit application."""
@@ -27,147 +59,108 @@ def main():
     st.title("Geothermal Power Output Prediction")
 
     # --- Main Tabs ---
-    training_tab, forecasting_tab = st.tabs(["Model Training & Prediction", "Time Series Forecasting"])
+    training_tab, analysis_tab, forecasting_tab, nextday_tab = st.tabs([
+        "Model Training & Prediction", 
+        "Time Series Analysis", 
+        "Long Horizon Extrapolation",
+        "Next Day Prediction"
+    ])
 
     # --- Model Training & Prediction Tab ---
     with training_tab:
-        st.sidebar.title("Model Options")
-        model_option = st.sidebar.radio("Choose an option:", ["Use Default Model", "Train New Model"])
-
+        st.header("Model Training & Prediction")
+        
         models_dir = "models"
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
 
-        if model_option == "Train New Model":
-            st.header("Train a New Model")
-            training_file = st.file_uploader("Upload training data (CSV or Excel)", type=['csv', 'xlsx'], key="training_file")
-
-            if training_file:
-                try:
-                    st.subheader("Time Series Settings")
-                    
-                    has_datetime_col = st.checkbox("My data has a datetime column", value=True)
-                    
-                    if has_datetime_col:
-                        # Read the file header from the in-memory buffer to get columns
-                        header_df = pd.read_excel(training_file, nrows=0) if training_file.name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(training_file, nrows=0)
-                        # IMPORTANT: Reset buffer to the beginning for the next read
-                        training_file.seek(0)
-                        datetime_col = st.selectbox("Select your datetime column", header_df.columns.tolist())
-                        start_date = None
-                    else:
-                        start_date = st.date_input("Select a start date for your data")
-                        datetime_col = None
-
-                    frequency = st.selectbox("Select data frequency", ["1min", "5min", "15min", "30min", "1h", "2h", "4h", "6h", "8h", "12h", "1d"], index=4)
-
-                    df = load_and_parse(training_file, datetime_col=datetime_col, start_date=start_date, freq=frequency)
-                    df = enforce_frequency(df, freq=frequency)
-                    sanity_checks(df)
-                    st.success("File loaded and preprocessed successfully!")
-                    st.dataframe(df.head())
-
-                    st.subheader("Column Mapping")
-                    all_cols = df.columns.tolist()
-                    target_col = st.selectbox("Select Target Column", all_cols, index=len(all_cols) - 1)
-                    available_cols = [col for col in all_cols if col != target_col]
-                    brine_col = st.selectbox("Select Primary Brine Flowrate Column", available_cols)
-                    steam_col = st.selectbox("Select Primary Steam Flowrate Column", [c for c in available_cols if c != brine_col])
-
-                    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-                    if target_col in numeric_cols:
-                        numeric_cols.remove(target_col)
-                    # Remove outlier detection and imputation
-                    # df = detect_and_impute_outliers(df, cols=numeric_cols)
-
-                    st.session_state['training_data_for_viz'] = {
-                        'X_train': df.drop(target_col, axis=1), 'y_train': df[target_col],
-                        'X_test': df.drop(target_col, axis=1).iloc[:0], 'y_test': df[target_col].iloc[:0], # For viz purposes
-                        'feature_names': df.drop(target_col, axis=1).columns.tolist(),
-                        'target_column': target_col, 'brine_col': brine_col, 'steam_col': steam_col
-                    }
-
-                    st.subheader("Model Hyperparameters")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        n_estimators = st.slider("Number of Trees", 50, 800, 300, 50)
-                        learning_rate = st.slider("Learning Rate", 0.01, 0.3, 0.05, 0.01)
-                        max_depth = st.slider("Max Tree Depth", 3, 10, 4, 1)
-                    with col2:
-                        min_child_weight = st.slider("Min Child Weight", 1, 10, 4, 1)
-                        subsample = st.slider("Subsample Ratio", 0.5, 1.0, 0.8, 0.1)
-                        colsample_bytree = st.slider("Column Sample by Tree", 0.5, 1.0, 0.8, 0.1)
-                    
-                    test_size = st.slider("Test Set Size", 0.1, 0.5, 0.2, 0.01)
-                    st.session_state['model_params'] = {'n_estimators': n_estimators, 'learning_rate': learning_rate, 'max_depth': max_depth, 'min_child_weight': min_child_weight, 'subsample': subsample, 'colsample_bytree': colsample_bytree}
-
-                    if st.button("Train New Model"):
-                        metrics = train_model(
-                            training_file, 
-                            models_dir, 
-                            target_column=target_col, 
-                            datetime_col=datetime_col,
-                            start_date=start_date,
-                            freq=frequency,
-                            model_params=st.session_state.get('model_params'), 
-                            test_size=test_size
-                        )
-                        st.session_state['new_model_metrics'] = metrics
-                        st.session_state['new_model_trained'] = True
-                        model, scaler, feature_names = load_latest_model_files(models_dir)
-                        st.session_state['new_model_model'] = model
-                        st.session_state['new_model_scaler'] = scaler
-                        st.session_state['new_model_feature_names'] = feature_names
-                        st.session_state['new_model_training_data'] = st.session_state['training_data_for_viz']
-                        cleanup_old_models(models_dir)
-                        st.success("New model trained and loaded successfully!")
-
-                except Exception as e:
-                    st.error(f"Error processing file: {e}")
-
-        model, scaler, feature_names, training_data, status = load_selected_model_components(model_option, models_dir)
+        # Load default model components using cached function
+        model, scaler, feature_names, training_data, status = load_selected_model_components("Use Default Model", models_dir)
         st.sidebar.write(status)
 
         if model and scaler and feature_names and training_data:
-            explore_tab, predict_tab = st.tabs(["Explore Model", "Make Predictions"])
+            explore_tab, explore_clean_tab, predict_tab = st.tabs(["Explore Raw Data", "Explore Clean Data", "Make Predictions"])
             with explore_tab:
-                st.header("Model & Training Data Exploration")
                 display_data_visualizations(training_data, model)
-            with predict_tab:
-                st.header("Make Predictions with the Loaded Model")
-                handle_prediction_workflow(model, scaler, feature_names, training_data)
-
-            metrics = None
-            if model_option == "Use Default Model":
+            with explore_clean_tab:
+                # For default model, clean the data on the fly
                 metrics_path = os.path.join(models_dir, "default_metrics.json")
                 if os.path.exists(metrics_path):
                     with open(metrics_path, 'r') as f:
                         metrics = json.load(f)
-            elif model_option == "Train New Model" and st.session_state.get('new_model_trained'):
-                metrics = st.session_state.get('new_model_metrics')
-            display_model_metrics(metrics)
+                    # Use cached data loading
+                    default_data = load_default_data_cached()
+                    if default_data is not None:
+                        cleaned_default, cleaning_steps = clean_time_series_data(default_data)
+                        target_col = metrics.get('target_column', cleaned_default.columns[-1])
+                        display_data_visualizations({
+                            'X_train': cleaned_default.drop(target_col, axis=1),
+                            'y_train': cleaned_default[target_col],
+                            'feature_names': cleaned_default.drop(target_col, axis=1).columns.tolist(),
+                            'target_column': target_col
+                        }, model)
+                        display_cleaning_summary(cleaning_steps)
+            with predict_tab:
+                st.header("Make Predictions with the Loaded Model")
+                handle_prediction_workflow(model, scaler, feature_names, training_data)
 
-    # --- Time Series Forecasting Tab ---
+            # Display model metrics
+            metrics_path = os.path.join(models_dir, "default_metrics.json")
+            if os.path.exists(metrics_path):
+                with open(metrics_path, 'r') as f:
+                    metrics = json.load(f)
+                display_model_metrics(metrics)
+
+    # --- Time Series Analysis Tab ---
+    with analysis_tab:
+        try:
+            # Use cached data loading
+            default_training_data = load_default_training_data_cached()
+            model, scaler, feature_names = load_default_model_components_cached()
+            default_data = load_default_data_cached()
+            
+            if default_training_data is not None and default_data is not None and model is not None:
+                target_col = default_training_data.get('target_column', default_data.columns[-1])
+                training_data_for_analysis = {
+                    'X_train': default_data.drop(columns=[target_col]),
+                    'y_train': default_data[target_col],
+                    'target_column': target_col,
+                    'scaler': scaler
+                }
+
+                raw_tab, clean_tab = st.tabs(["Raw Data", "Cleaned Data"])
+                with raw_tab:
+                    display_time_series_analysis(training_data_for_analysis, model, label_prefix="Raw ")
+                with clean_tab:
+                    # Clean the data for display
+                    cleaned_X, cleaning_steps_X = clean_time_series_data(training_data_for_analysis['X_train'])
+                    cleaned_y, cleaning_steps_y = clean_time_series_data(training_data_for_analysis['y_train'].to_frame())
+                    cleaned_data = {
+                        'X_train': cleaned_X,
+                        'y_train': cleaned_y.squeeze(),
+                        'target_column': training_data_for_analysis['target_column'],
+                        'scaler': training_data_for_analysis.get('scaler')
+                    }
+                    display_time_series_analysis(cleaned_data, model, label_prefix="Cleaned ")
+                    display_cleaning_summary(cleaning_steps_X + cleaning_steps_y)
+        except Exception as e:
+            st.error(f"An error occurred in the Time Series Analysis tab: {e}")
+            st.exception(e)
+
+    # --- Long Horizon Extrapolation Tab ---
     with forecasting_tab:
-        st.header("Time Series Forecasting")
-        if not (model_option == "Use Default Model" or st.session_state.get('new_model_trained', False)):
-            st.warning("Please train or select a model first to use Time Series Forecasting.")
-        else:
-            try:
-                if model_option == "Use Default Model":
-                    peek_df = pd.read_excel("data/default_data.xlsx", nrows=0)
-                    datetime_col = peek_df.columns[0]
-                    default_data = load_and_parse("data/default_data.xlsx", datetime_col=datetime_col)
-                    ts_data = enforce_frequency(default_data, freq='h')
-                    target_col = joblib.load(os.path.join("models", "default_training_data.pkl")).get('target_column', ts_data.columns[-1])
-                    brine_col = "Brine Flowrate (T/h)"
-                    steam_col = "NCG+Steam Flowrate (T/h)"
-                else: # A new model is trained
-                    ts_data = training_data['X_train'].copy()
-                    ts_data[training_data['target_column']] = training_data['y_train']
-                    target_col = training_data['target_column']
-                    brine_col = training_data.get('brine_col')
-                    steam_col = training_data.get('steam_col')
+        st.header("Long Horizon Extrapolation")
+        try:
+            # Use cached data loading
+            default_data = load_default_data_cached()
+            default_training_data = load_default_training_data_cached()
+            model, scaler, feature_names = load_default_model_components_cached()
+            
+            if default_data is not None and default_training_data is not None and model is not None and scaler is not None and feature_names is not None:
+                ts_data = enforce_frequency(default_data, freq='h', silent=True)
+                target_col = default_training_data.get('target_column', ts_data.columns[-1])
+                brine_col = "Brine Flowrate (T/h)"
+                steam_col = "NCG+Steam Flowrate (T/h)"
 
                 st.subheader("Feature Trends")
                 years = st.slider("Number of years to project", 1, 40, 20)
@@ -247,83 +240,413 @@ def main():
                         download_df_sim[f'{target_col} (with MUW)'] = adjusted_series
                         st.session_state.csv_with_sim = download_df_sim.to_csv()
 
-                if 'adjusted_series' in st.session_state:
-                    st.subheader("Simulation Results")
-                    adjusted_series = st.session_state.adjusted_series
-                    pulses = st.session_state.pulses
-                    original_future_features = st.session_state.original_future_features
-                    adjusted_future_features = st.session_state.adjusted_future_features
-                    scenario_data = st.session_state.scenario_data
-                    target_col = st.session_state.target_col
-                    years = st.session_state.years
-                    brine_col = st.session_state.brine_col
-                    steam_col = st.session_state.steam_col
-                    
-                    fig_well = go.Figure()
-                    if len(scenario_data) > 2000:
-                        plot_target = scenario_data[target_col].resample('D').mean()
-                        plot_adjusted = adjusted_series.resample('D').mean()
-                    else:
-                        plot_target = scenario_data[target_col]
-                        plot_adjusted = adjusted_series
-                    fig_well.add_trace(go.Scatter(x=plot_adjusted.index, y=plot_adjusted.values, name='Adjusted with New Wells', mode='lines'))
-                    fig_well.add_trace(go.Scatter(x=plot_target.index, y=plot_target.values, name='Original Predictions', mode='lines'))
-                    for pulse_time in pulses:
-                        fig_well.add_vline(x=pulse_time, line_color="red")
-                    fig_well.update_layout(title='Power Predictions with New Wells', xaxis_title='Date', yaxis_title=target_col, hovermode='x unified')
-                    st.plotly_chart(fig_well, use_container_width=True)
+                    if 'adjusted_series' in st.session_state:
+                        st.subheader("Simulation Results")
+                        adjusted_series = st.session_state.adjusted_series
+                        pulses = st.session_state.pulses
+                        original_future_features = st.session_state.original_future_features
+                        adjusted_future_features = st.session_state.adjusted_future_features
+                        scenario_data = st.session_state.scenario_data
+                        target_col = st.session_state.target_col
+                        years = st.session_state.years
+                        brine_col = st.session_state.brine_col
+                        steam_col = st.session_state.steam_col
+                        
+                        fig_well = go.Figure()
+                        if len(scenario_data) > 2000:
+                            plot_target = scenario_data[target_col].resample('D').mean()
+                            plot_adjusted = adjusted_series.resample('D').mean()
+                        else:
+                            plot_target = scenario_data[target_col]
+                            plot_adjusted = adjusted_series
+                        fig_well.add_trace(go.Scatter(x=plot_adjusted.index, y=plot_adjusted.values, name='Adjusted with New Wells', mode='lines'))
+                        fig_well.add_trace(go.Scatter(x=plot_target.index, y=plot_target.values, name='Original Predictions', mode='lines'))
+                        for pulse_time in pulses:
+                            fig_well.add_vline(x=pulse_time, line_color="red")
+                        fig_well.update_layout(title='Power Predictions with New Wells', xaxis_title='Date', yaxis_title=target_col, hovermode='x unified')
+                        st.plotly_chart(fig_well, use_container_width=True)
 
-                    st.subheader("Yearly Power Predictions with New Wells")
-                    yearly_adjusted_avg = adjusted_series.resample('Y').mean()
-                    fig_yearly_well = go.Figure()
-                    fig_yearly_well.add_trace(go.Scatter(x=yearly_adjusted_avg.index, y=yearly_adjusted_avg.round(4).values, name='Yearly Average', mode='lines'))
-                    for pulse_time in pulses:
-                        fig_yearly_well.add_vline(x=pulse_time, line_color="red")
-                    fig_yearly_well.add_hline(y=threshold, line_dash="dot", line_color="red", annotation_text=f"Drilling Threshold: {threshold:.2f} MW", annotation_position="bottom right")
-                    fig_yearly_well.update_layout(title='Yearly Average Power Predictions with New Wells', xaxis_title='Year', yaxis_title=f'Average {target_col}', hovermode='x unified')
-                    st.plotly_chart(fig_yearly_well, use_container_width=True)
+                        st.subheader("Yearly Power Predictions with New Wells")
+                        yearly_adjusted_avg = adjusted_series.resample('Y').mean()
+                        fig_yearly_well = go.Figure()
+                        fig_yearly_well.add_trace(go.Scatter(x=yearly_adjusted_avg.index, y=yearly_adjusted_avg.round(4).values, name='Yearly Average', mode='lines'))
+                        for pulse_time in pulses:
+                            fig_yearly_well.add_vline(x=pulse_time, line_color="red")
+                        fig_yearly_well.add_hline(y=threshold, line_dash="dot", line_color="red", annotation_text=f"Drilling Threshold: {threshold:.2f} MW", annotation_position="bottom right")
+                        fig_yearly_well.update_layout(title='Yearly Average Power Predictions with New Wells', xaxis_title='Year', yaxis_title=f'Average {target_col}', hovermode='x unified')
+                        st.plotly_chart(fig_yearly_well, use_container_width=True)
 
-                    st.subheader("Quarterly Power Predictions with New Wells")
-                    quarterly_adjusted_avg = adjusted_series.resample('3M').mean()
-                    fig_quarterly_well = go.Figure()
-                    fig_quarterly_well.add_trace(go.Scatter(x=quarterly_adjusted_avg.index, y=quarterly_adjusted_avg.round(4).values, name='Quarterly Average', mode='lines'))
-                    for pulse_time in pulses:
-                        fig_quarterly_well.add_vline(x=pulse_time, line_color="red")
-                    fig_quarterly_well.add_hline(y=threshold, line_dash="dot", line_color="red", annotation_text=f"Drilling Threshold: {threshold:.2f} MW", annotation_position="bottom right")
-                    fig_quarterly_well.update_layout(title='Quarterly Average Power Predictions with New Wells', xaxis_title='Quarter', yaxis_title=f'Average {target_col}', hovermode='x unified')
-                    st.plotly_chart(fig_quarterly_well, use_container_width=True)
+                        st.subheader("Quarterly Power Predictions with New Wells")
+                        quarterly_adjusted_avg = adjusted_series.resample('3M').mean()
+                        fig_quarterly_well = go.Figure()
+                        fig_quarterly_well.add_trace(go.Scatter(x=quarterly_adjusted_avg.index, y=quarterly_adjusted_avg.round(4).values, name='Quarterly Average', mode='lines'))
+                        for pulse_time in pulses:
+                            fig_quarterly_well.add_vline(x=pulse_time, line_color="red")
+                        fig_quarterly_well.add_hline(y=threshold, line_dash="dot", line_color="red", annotation_text=f"Drilling Threshold: {threshold:.2f} MW", annotation_position="bottom right")
+                        fig_quarterly_well.update_layout(title='Quarterly Average Power Predictions with New Wells', xaxis_title='Quarter', yaxis_title=f'Average {target_col}', hovermode='x unified')
+                        st.plotly_chart(fig_quarterly_well, use_container_width=True)
 
-                    st.subheader("Adjusted Input Features from New Wells")
-                    if len(original_future_features) > 2000:
-                        plot_future_features = original_future_features.resample('D').mean()
-                        plot_adjusted_features = adjusted_future_features.resample('D').mean()
-                    else:
-                        plot_future_features = original_future_features
-                        plot_adjusted_features = adjusted_future_features
-                    
-                    fig_brine = go.Figure()
-                    fig_brine.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[brine_col], name=f'Adjusted {brine_col}', mode='lines', line=dict(color='orange')))
-                    fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[brine_col], name=f'Original {brine_col}', mode='lines', line=dict(color='blue')))
-                    for pulse_time in pulses:
-                        fig_brine.add_vline(x=pulse_time, line_color="red")
-                    fig_brine.update_layout(title=f'{brine_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
-                    st.plotly_chart(fig_brine, use_container_width=True)
+                        st.subheader("Adjusted Input Features from New Wells")
+                        if len(original_future_features) > 2000:
+                            plot_future_features = original_future_features.resample('D').mean()
+                            plot_adjusted_features = adjusted_future_features.resample('D').mean()
+                        else:
+                            plot_future_features = original_future_features
+                            plot_adjusted_features = adjusted_future_features
+                        
+                        fig_brine = go.Figure()
+                        fig_brine.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[brine_col], name=f'Adjusted {brine_col}', mode='lines', line=dict(color='orange')))
+                        fig_brine.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[brine_col], name=f'Original {brine_col}', mode='lines', line=dict(color='blue')))
+                        for pulse_time in pulses:
+                            fig_brine.add_vline(x=pulse_time, line_color="red")
+                        fig_brine.update_layout(title=f'{brine_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
+                        st.plotly_chart(fig_brine, use_container_width=True)
 
-                    fig_ncg = go.Figure()
-                    fig_ncg.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[steam_col], name=f'Adjusted {steam_col}', mode='lines', line=dict(color='purple')))
-                    fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[steam_col], name=f'Original {steam_col}', mode='lines', line=dict(color='green')))
-                    for pulse_time in pulses:
-                        fig_ncg.add_vline(x=pulse_time, line_color="red")
-                    fig_ncg.update_layout(title=f'{steam_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
-                    st.plotly_chart(fig_ncg, use_container_width=True)
-                    
-                    st.subheader(f"Expected number of make-up wells to drill over {years} years: **{len(pulses)}**")
+                        fig_ncg = go.Figure()
+                        fig_ncg.add_trace(go.Scatter(x=plot_adjusted_features.index, y=plot_adjusted_features[steam_col], name=f'Adjusted {steam_col}', mode='lines', line=dict(color='purple')))
+                        fig_ncg.add_trace(go.Scatter(x=plot_future_features.index, y=plot_future_features[steam_col], name=f'Original {steam_col}', mode='lines', line=dict(color='green')))
+                        for pulse_time in pulses:
+                            fig_ncg.add_vline(x=pulse_time, line_color="red")
+                        fig_ncg.update_layout(title=f'{steam_col} with New Wells', xaxis_title='Date', yaxis_title='Flowrate (T/h)', hovermode='x unified')
+                        st.plotly_chart(fig_ncg, use_container_width=True)
+                        
+                        st.subheader(f"Expected number of make-up wells to drill over {years} years: **{len(pulses)}**")
 
-                    if 'csv_with_sim' in st.session_state:
-                        st.download_button("Download Scenario Data (with MUW simulation)", st.session_state.csv_with_sim, "scenario_predictions_with_MUW_simulation.csv", "text/csv")
-                    
+                        if 'csv_with_sim' in st.session_state:
+                            st.download_button("Download Scenario Data (with MUW simulation)", st.session_state.csv_with_sim, "scenario_predictions_with_MUW_simulation.csv", "text/csv")
+                
+        except Exception as e:
+            st.error(f"An error occurred in the forecasting tab: {e}")
+
+    # --- Next Day Prediction Tab ---
+    with nextday_tab:
+        st.header("Next Day Prediction")
+        st.write("Upload today's operational data (24 hours) to predict tomorrow's hourly gross power output.")
+        
+        # Show expected upload file format
+        st.subheader("Expected Upload File Format")
+        st.write("Your CSV/Excel file should contain exactly 24 rows (one for each hour) with the following columns:")
+        
+        # Create example data (updated to remove pressure differential)
+        example_data = pd.DataFrame({
+            'datetime': pd.date_range('2024-01-15 00:00:00', periods=24, freq='H'),
+            'Brine Flowrate (T/h)': [1200 + i*2 for i in range(24)],
+            'NCG+Steam Flowrate (T/h)': [450 - i*1.2 for i in range(24)],
+            'Ambient Temperature (°C)': [15 - i*0.3 for i in range(24)],
+        })
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.write("**Required columns:**")
+            st.dataframe(example_data.head(6), use_container_width=True)
+            st.write("*Note: The 'Gross Power (MW)' column is used for validation but not for prediction*")
+        
+        with col2:
+            st.write("**File requirements:**")
+            st.write("• Exactly 24 rows (hours)")
+            st.write("• Hourly data (00:00 to 23:00)")
+            st.write("• Datetime column (optional)")
+            st.write("• All feature columns present")
+        
+        # Download example file
+        csv_example = example_data.to_csv(index=False)
+        st.download_button(
+            "Download Example File (CSV)",
+            data=csv_example,
+            file_name="example_nextday_input.csv",
+            mime="text/csv"
+        )
+        
+        # Check if next-day model exists
+        nextday_model_path = os.path.join(models_dir, "nextday_model.pkl")
+        if not os.path.exists(nextday_model_path):
+            st.warning("Next-day prediction model not found. Please train the model first.")
+            if st.button("Train Next-Day Model"):
+                with st.spinner("Training next-day prediction model..."):
+                    try:
+                        # Load default data for training
+                        default_data = pd.read_excel("data/default_data.xlsx")
+                        datetime_col = default_data.columns[0]
+                        target_col = "Gross Power (MW)"  # Assuming this is the target
+                        
+                        # Train the next-day model
+                        metrics = train_nextday_model(
+                            data_source="data/default_data.xlsx",
+                            models_dir=models_dir,
+                            target_column=target_col,
+                            datetime_col=datetime_col,
+                            window_hours=24
+                        )
+                        
+                        st.success("Next-day prediction model trained successfully!")
+                        st.json(metrics)
+                        
+                    except Exception as e:
+                        st.error(f"Error training next-day model: {e}")
+                        st.exception(e)
+        else:
+            try:
+                nextday_models = joblib.load(nextday_model_path)
+                nextday_scaler = joblib.load(os.path.join(models_dir, "nextday_scaler.pkl"))
+                nextday_feature_names = joblib.load(os.path.join(models_dir, "nextday_feature_names.pkl"))
+                
+                # Load metrics
+                nextday_metrics_path = os.path.join(models_dir, "nextday_metrics.json")
+                if os.path.exists(nextday_metrics_path):
+                    with open(nextday_metrics_path, 'r') as f:
+                        nextday_metrics = json.load(f)
+                
+                st.success("Next-day prediction model loaded successfully!")
+                
+                # Display model performance
+                if 'nextday_metrics' in locals():
+                    st.subheader("Model Performance")
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Overall RMSE", f"{nextday_metrics['overall_metrics']['rmse']:.4f}")
+                    with col2:
+                        st.metric("Overall R²", f"{nextday_metrics['overall_metrics']['r2']:.4f}")
+                    with col3:
+                        st.metric("Window Hours", nextday_metrics['window_hours'])
+                    with col4:
+                        st.metric("Best Test Day RMSE", f"{nextday_metrics.get('best_test_example_rmse', 'N/A'):.4f}")
+                
+                # --- Show best test example ---
+                st.subheader("Best Prediction Example from Test Set")
+                example_path = os.path.join(models_dir, "nextday_best_example.pkl")
+                if os.path.exists(example_path):
+                    try:
+                        best_example = joblib.load(example_path)
+                        
+                        actual_values = best_example['actual_values']
+                        predicted_values = best_example['predicted_values']
+                        rmse = best_example['rmse']
+                        input_date = pd.to_datetime(best_example['input_timestamp']).strftime('%Y-%m-%d')
+                        prediction_date = (pd.to_datetime(best_example['input_timestamp']) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+
+                        st.write(f"This example shows the model's best performance on the test set, predicting for **{prediction_date}** based on data from **{input_date}**.")
+
+                        # Create comparison DataFrame
+                        hours = pd.date_range(start=prediction_date, periods=24, freq='H')
+                        comparison_df = pd.DataFrame({
+                            'Hour': hours,
+                            'Actual (MW)': actual_values,
+                            'Predicted (MW)': predicted_values,
+                        })
+                        comparison_df['Error (MW)'] = comparison_df['Predicted (MW)'] - comparison_df['Actual (MW)']
+                        
+                        # --- Visualization: Actual vs Predicted ---
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=comparison_df['Hour'],
+                            y=comparison_df['Actual (MW)'],
+                            mode='lines+markers',
+                            name='Actual',
+                            line=dict(color='#1f77b4', width=3),
+                            marker=dict(size=8)
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=comparison_df['Hour'],
+                            y=comparison_df['Predicted (MW)'],
+                            mode='lines+markers',
+                            name='Predicted',
+                            line=dict(color='#ff7f0e', width=3, dash='dash'),
+                            marker=dict(size=8, symbol='diamond')
+                        ))
+                        
+                        fig.update_layout(
+                            title=f'Best Example: Actual vs Predicted Power ({prediction_date})',
+                            xaxis_title='Hour',
+                            yaxis_title='Gross Power (MW)',
+                            yaxis_range=[0, 60], # Set fixed y-axis range
+                            hovermode='x unified',
+                            height=400,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # --- Visualization: Prediction Error Plot ---
+                        fig_errors = go.Figure()
+                        fig_errors.add_trace(go.Scatter(
+                            x=list(range(24)),
+                            y=comparison_df['Error (MW)'],
+                            mode='lines+markers',
+                            name=f'Error on {prediction_date}',
+                            line=dict(color='#d62728', width=2),
+                            marker=dict(size=6)
+                        ))
+                        fig_errors.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Perfect Prediction", annotation_position="bottom right")
+                        fig_errors.update_layout(
+                            title='Prediction Error by Hour of Day (Best Example)',
+                            xaxis_title='Hour of Day',
+                            yaxis_title='Prediction Error (MW)',
+                            hovermode='x unified',
+                            height=400
+                        )
+                        st.plotly_chart(fig_errors, use_container_width=True)
+
+                        # --- Summary Statistics ---
+                        st.write("**Prediction Summary for Best Example:**")
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("RMSE", f"{rmse:.2f} MW")
+                        col2.metric("Mean Absolute Error", f"{np.mean(np.abs(comparison_df['Error (MW)'].values)):.2f} MW")
+                        col3.metric("Max Error", f"{comparison_df['Error (MW)'].abs().max():.2f} MW")
+                        
+                    except Exception as e:
+                        st.warning(f"Could not load or display the best prediction example: {e}")
+                else:
+                    st.info("Best prediction example file not found. Please re-run the `create_default_model.py` script.")
+
+                # File upload for today's data
+                st.subheader("Make Your Prediction")
+                uploaded_file = st.file_uploader(
+                    "Upload today's operational data (CSV or Excel)", 
+                    type=['csv', 'xlsx'], 
+                    key="nextday_upload"
+                )
+                
+                if uploaded_file:
+                    try:
+                        # Load and process the uploaded data
+                        if uploaded_file.name.endswith('.csv'):
+                            user_data = pd.read_csv(uploaded_file)
+                        else:
+                            user_data = pd.read_excel(uploaded_file)
+
+                        # --- Data Validation ---
+                        st.write("Uploaded Data Preview:")
+                        st.dataframe(user_data.head(), use_container_width=True)
+
+                        if len(user_data) != 24:
+                            st.error(f"Error: Expected 24 rows (one for each hour), but got {len(user_data)}.")
+                            st.stop()
+                        
+                        # Find datetime column if it exists
+                        datetime_col = None
+                        for col in user_data.columns:
+                            if 'date' in col.lower() or 'time' in col.lower():
+                                datetime_col = col
+                                break
+                        
+                        if datetime_col:
+                            try:
+                                user_data[datetime_col] = pd.to_datetime(user_data[datetime_col])
+                                user_data = user_data.set_index(datetime_col)
+                            except Exception:
+                                st.warning("Could not parse the datetime column. Proceeding without a time index.")
+                                user_data = user_data.drop(columns=[datetime_col])
+                        
+                        # Check for required feature columns
+                        base_features = [f.split('_hour_')[0] for f in nextday_feature_names if '_hour_' in f]
+                        base_features = sorted(list(set(base_features))) # Get unique base features
+                        
+                        missing_cols = [col for col in base_features if col not in user_data.columns]
+                        
+                        if missing_cols:
+                            st.error(f"Error: The following required columns are missing from your upload: {', '.join(missing_cols)}")
+                            st.stop()
+
+                        # --- Prepare input for prediction ---
+                        # Add a dummy target column as it's expected by the processing function
+                        user_data["Gross Power (MW)"] = 0
+                        
+                        # Select only the necessary columns in the correct order for the model
+                        user_data_ordered = user_data[base_features + ["Gross Power (MW)"]]
+
+                        input_features = create_nextday_features(user_data_ordered, "Gross Power (MW)", window_hours=24, silent=True)
+                        
+                        # Scale features
+                        input_scaled = nextday_scaler.transform(input_features.drop(columns=['timestamp']))
+                        input_scaled_df = pd.DataFrame(input_scaled, columns=nextday_feature_names)
+                        
+                        # Make predictions
+                        predictions = []
+                        for hour in range(24):
+                            pred = nextday_models[hour].predict(input_scaled_df)[0]
+                            predictions.append(pred)
+                        
+                        # --- Display Prediction Results ---
+                        st.subheader("Your Next-Day Power Prediction")
+                        
+                        # Create results DataFrame
+                        prediction_date = pd.to_datetime(user_data.index.max() if isinstance(user_data.index, pd.DatetimeIndex) else "today") + pd.Timedelta(days=1)
+                        result_hours = pd.date_range(start=prediction_date.date(), periods=24, freq='H')
+                        
+                        results_df = pd.DataFrame({
+                            'Hour': result_hours,
+                            'Predicted Power (MW)': predictions
+                        })
+                        
+                        # Plot results
+                        fig_pred = go.Figure()
+                        fig_pred.add_trace(go.Scatter(
+                            x=results_df['Hour'],
+                            y=results_df['Predicted Power (MW)'],
+                            mode='lines+markers',
+                            name='Predicted',
+                            line=dict(color='#2ca02c', width=3),
+                            marker=dict(size=8)
+                        ))
+                        
+                        fig_pred.update_layout(
+                            title=f'Predicted Gross Power for {prediction_date.strftime("%Y-%m-%d")}',
+                            xaxis_title='Hour',
+                            yaxis_title='Gross Power (MW)',
+                            hovermode='x unified',
+                            height=400
+                        )
+                        
+                        col1, col2 = st.columns([1, 1])
+                        with col1:
+                            st.plotly_chart(fig_pred, use_container_width=True)
+                        
+                        with col2:
+                            st.write("**Prediction Summary:**")
+                            st.metric("Average Predicted Power", f"{np.mean(predictions):.2f} MW")
+                            st.metric("Peak Power", f"{np.max(predictions):.2f} MW")
+                            st.metric("Minimum Power", f"{np.min(predictions):.2f} MW")
+
+                            st.write("**Predicted Hourly Values:**")
+                            st.dataframe(results_df.set_index('Hour').round(2), use_container_width=True, height=250)
+                            
+                        # Download button for predictions
+                        csv_pred = results_df.to_csv(index=False)
+                        st.download_button(
+                            "Download Predictions (CSV)",
+                            data=csv_pred,
+                            file_name=f"nextday_prediction_{prediction_date.strftime('%Y%m%d')}.csv",
+                            mime="text/csv"
+                        )
+
+                    except Exception as e:
+                        st.error("An error occurred while processing your file.")
+                        st.exception(e)
             except Exception as e:
-                st.error(f"An error occurred in the forecasting tab: {e}")
+                st.error(f"Error loading next-day model: {e}")
+        
+        # Add a button to retrain all models
+        st.sidebar.subheader("Model Management")
+        if st.sidebar.button("Re-train All Models", key="retrain_all"):
+            with st.spinner("Re-training all models from `data/default_data.xlsx`... This may take a few minutes."):
+                try:
+                    import create_default_model
+                    create_default_model.main()
+                    st.success("All models have been re-trained successfully!")
+                    st.rerun() # Rerun the app to load new models
+                except Exception as e:
+                    st.error(f"An error occurred during re-training: {e}")
+                    st.exception(e)
+
+def about_page():
+    st.title("About GPOP")
+    st.write("""
+This application, **Geothermal Power Output Predictor (GPOP)**, is designed to provide forecasts for geothermal power generation.
+It leverages machine learning models trained on historical operational data to deliver two key predictive functions:
+- **Simple Power Prediction**: A straightforward model that predicts gross power output based on a given set of input features.
+- **Next-Day Hourly Prediction**: A more complex model that takes 24 hours of operational data to forecast the hourly power output for the following 24 hours.
+
+The models are trained using XGBoost, a powerful and efficient gradient boosting library. The application is built with Streamlit, providing an interactive and user-friendly interface.
+    """)
 
 if __name__ == "__main__":
     main()

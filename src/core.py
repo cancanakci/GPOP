@@ -17,10 +17,10 @@ from file_utils import load_default_model
 from ui_components import display_input_warnings, display_prediction_visualizations
 
 def load_selected_model_components(model_option, models_dir):
-    """Loads the appropriate model components based on user selection."""
+    """Loads the default model components."""
     model, scaler, feature_names, training_data, status = None, None, None, None, ""
 
-    if model_option == "Use Default Model":
+    try:
         model, scaler, feature_names = load_default_model(models_dir)
         if model and scaler and feature_names:
             try:
@@ -29,71 +29,66 @@ def load_selected_model_components(model_option, models_dir):
             except Exception as e:
                 status = f"Default model loaded, but error loading training data: {e}"
         else:
-            status = "Default model not found. Please train a new model."
-
-    elif model_option == "Train New Model":
-        if st.session_state.get('new_model_trained', False):
-            model = st.session_state.get('new_model_model')
-            scaler = st.session_state.get('new_model_scaler')
-            feature_names = st.session_state.get('new_model_feature_names')
-            training_data = st.session_state.get('new_model_training_data')
-            if model and scaler and feature_names and training_data:
-                status = "Newly trained model loaded successfully."
-            else:
-                status = "No new model has been trained yet."
-        else:
-            status = "No new model has been trained yet."
+            status = "Default model not found. Please ensure the model files exist."
+    except Exception as e:
+        status = f"Error loading default model: {e}"
 
     return model, scaler, feature_names, training_data, status
 
 def handle_prediction_workflow(model, scaler, feature_names, training_data):
-    """Handles the prediction input, processing, and output display."""
-    st.subheader("Make Predictions")
-    input_method = st.radio(
-        "Select input method:",
-        ["Single Prediction", "Batch Prediction"],
-        key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_predict_method"
-    )
-
+    """Handles the prediction workflow for both single and batch predictions."""
     target_column = training_data.get('target_column', 'Target')
-
-    if training_data is not None:
-        X_train = training_data['X_train']
-        feature_names = [f for f in feature_names if f in X_train.columns]
-
-    if input_method == "Single Prediction":
-        st.write("Enter values for prediction:")
-        input_data = {}
-
-        if training_data is not None:
-            for feature in feature_names:
-                if feature not in X_train.columns:
-                    continue
-                train_min = X_train[feature].min()
-                train_max = X_train[feature].max()
-
-                input_data[feature] = st.number_input(
-                    f"{feature} (Range: {train_min:.2f} - {train_max:.2f})",
-                    value=0.0,
-                    format="%.4f",
-                    key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_input_{feature}"
-                )
-        else:
-            st.warning("Training data not available. Cannot display typical ranges.")
-            for feature in feature_names:
-                input_data[feature] = st.number_input(f"{feature}", value=0.0, format="%.4f", key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_input_{feature}")
-
-        if st.button("Predict", key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_single_predict"):
-            try:
-                input_df = pd.DataFrame([input_data])
-                warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
-                scaled_input_features = scaler.transform(input_df)
-                scaled_input_df = pd.DataFrame(scaled_input_features, columns=feature_names)
-                prediction_value = predict(model, scaled_input_df)
-                display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
-                st.success(f"Predicted {target_column}: {prediction_value[0]:.2f}")
-            except Exception as e:
-                st.error(f"Error making prediction: {str(e)}")
+    
+    st.write("### Single Prediction")
+    st.write("Enter values for each feature to get a prediction:")
+    
+    # Create input fields for each feature
+    input_data = {}
+    col1, col2 = st.columns(2)
+    
+    for i, feature in enumerate(feature_names):
+        with col1 if i % 2 == 0 else col2:
+            # Get min/max values from training data for better input validation
+            min_val = training_data['X_train'][feature].min()
+            max_val = training_data['X_train'][feature].max()
+            mean_val = training_data['X_train'][feature].mean()
+            
+            input_data[feature] = st.number_input(
+                f"{feature}",
+                min_value=float(min_val * 0.5),
+                max_value=float(max_val * 1.5),
+                value=float(mean_val),
+                step=float((max_val - min_val) / 100),
+                help=f"Range: {min_val:.2f} - {max_val:.2f}"
+            )
+    
+    if st.button("Make Prediction"):
+        # Create input DataFrame
+        input_df = pd.DataFrame([input_data])
+        
+        # Check for warnings
+        warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
+        
+        # Scale the input
+        scaled_input = scaler.transform(input_df)
+        scaled_input_df = pd.DataFrame(scaled_input, columns=feature_names)
+        
+        # Make prediction
+        prediction = predict(model, scaled_input_df)
+        
+        # Display results
+        st.success(f"Prediction: **{prediction[0]:.2f} {target_column}**")
+        
+        # Display warnings if any
+        display_input_warnings(yellow_warnings, red_warnings, warning_flags_df, warning_ranges, input_df)
+        
+        # Show input values used
+        st.write("**Input values used:**")
+        input_summary = pd.DataFrame({
+            'Feature': list(input_data.keys()),
+            'Value': list(input_data.values())
+        })
+        st.dataframe(input_summary, use_container_width=True)
 
     else:
         st.write("### Batch Prediction")
@@ -113,7 +108,7 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
             })
             st.dataframe(ranges_df)
         
-        prediction_file = st.file_uploader("Upload data for batch prediction (CSV or Excel)", type=['csv', 'xlsx'], key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_batch_file")
+        prediction_file = st.file_uploader("Upload data for batch prediction (CSV or Excel)", type=['csv', 'xlsx'], key="batch_file")
         if prediction_file is not None:
             try:
                 pred_df = pd.read_csv(prediction_file) if prediction_file.name.lower().endswith('.csv') else pd.read_excel(prediction_file)
@@ -134,7 +129,7 @@ def handle_prediction_workflow(model, scaler, feature_names, training_data):
                 st.write("Data Preview:")
                 st.dataframe(pred_df.head())
                 
-                if st.button("Make Predictions", key=f"{model.n_estimators if hasattr(model, 'n_estimators') else 'default'}_batch_predict"):
+                if st.button("Make Predictions", key="batch_predict"):
                     valid_features = [f for f in feature_names if f in pred_df.columns]
                     input_df = pred_df[valid_features].copy()
                     warning_flags_df, yellow_warnings, red_warnings, warning_ranges = check_input_values(input_df, training_data)
