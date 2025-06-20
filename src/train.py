@@ -94,16 +94,15 @@ def train_model(data_source, models_dir, target_column=None, datetime_col=None, 
     # Use custom parameters if provided, otherwise use defaults
     default_params = {
         'objective': 'reg:squarederror',
-        'n_estimators': 300,
-        'learning_rate': 0.05,
-        'max_depth': 5,
+        'n_estimators': 600,
+        'learning_rate': 0.02,
+        'max_depth': 4,
         'min_child_weight': 5,
         'subsample': 0.8,
         'colsample_bytree': 0.8,
-        'random_state': 42,
+        'random_state': 12345,
         'n_jobs': -1,
         'eval_metric': 'rmse',
-        'early_stopping_rounds': 50
     }
     
     if is_default:
